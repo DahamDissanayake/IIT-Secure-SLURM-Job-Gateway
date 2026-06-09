@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import getpass
 import re
+import secrets
+import string
 import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -40,6 +42,23 @@ _USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
 def valid_username(username: str) -> bool:
     return bool(_USERNAME_RE.match(username or ""))
+
+
+def _gen_password() -> str:
+    """Generate a random 8-character password with lowercase, uppercase, digits, and symbols."""
+    symbols = "!@#$%&*"
+    pool = string.ascii_letters + string.digits + symbols
+    parts = [
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.digits),
+        secrets.choice(symbols),
+        *[secrets.choice(pool) for _ in range(4)],
+    ]
+    for i in range(len(parts) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        parts[i], parts[j] = parts[j], parts[i]
+    return "".join(parts)
 
 
 def _fmt_ts(ts_str: str) -> str:
@@ -502,13 +521,25 @@ def _provision_menu(style) -> None:
         email = ""
     email = email.strip()
     notes = questionary.text("Notes (optional):", style=style).ask() or ""
-    pw = questionary.password(
-        "Initial password — user will be required to change on first login (leave blank to set later):", style=style).ask() or ""
-    if pw:
-        pw2 = questionary.password("Confirm password:", style=style).ask() or ""
-        if pw != pw2:
-            err("Passwords do not match — user not created.")
-            return
+    _pw_mode = questionary.select(
+        "Initial password:",
+        choices=["Set it myself", "Generate a random password"],
+        style=style,
+    ).ask()
+    if _pw_mode is None:
+        return
+
+    if _pw_mode == "Set it myself":
+        pw = questionary.password(
+            "Password — user will be required to change on first login:", style=style).ask() or ""
+        if pw:
+            pw2 = questionary.password("Confirm password:", style=style).ask() or ""
+            if pw != pw2:
+                err("Passwords do not match — user not created.")
+                return
+    else:
+        pw = _gen_password()
+        ok(f"Generated password:  [bold cyan]{pw}[/]  ← note this down before continuing")
 
     # ── Workspace exists check (re-provision of offboarded user) ──────────────
     from iitgpu.config import load_config, user_dir

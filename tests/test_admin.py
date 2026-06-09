@@ -440,3 +440,20 @@ def test_login_as_cancel_does_not_launch(monkeypatch):
                         lambda *a, **k: ran.__setitem__("n", ran["n"] + 1))
     admin._login_as_menu(style=None)
     assert ran["n"] == 0
+
+
+def test_gen_password_length_and_charset():
+    import string
+    from iitgpu.admin import _gen_password
+    pw = _gen_password()
+    assert len(pw) == 8
+    assert any(c in string.ascii_lowercase for c in pw)
+    assert any(c in string.ascii_uppercase for c in pw)
+    assert any(c in string.digits for c in pw)
+    assert any(c in "!@#$%&*" for c in pw)
+
+
+def test_gen_password_unique():
+    from iitgpu.admin import _gen_password
+    passwords = {_gen_password() for _ in range(50)}
+    assert len(passwords) > 1
