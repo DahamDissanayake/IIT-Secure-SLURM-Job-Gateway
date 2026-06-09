@@ -179,3 +179,39 @@ def test_tensorboard_sbatch_emits_mail_directives_when_mail_user_set(tmp_path):
     script = render_tensorboard_sbatch(spec, folder, "/shared/logs")
     assert "#SBATCH --mail-user=dahamadmin@iit.ac.lk" in script
     assert "#SBATCH --mail-type=" in script
+
+
+def test_notebook_sbatch_tunnel_uses_dash_N(tmp_path):
+    """-N flag must appear in the printed tunnel command so running it does not
+    launch the TUI — without -N the SSH session auto-starts iit-gpu-manager and
+    the user sees the TUI instead of an idle tunnel."""
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder, port=8888,
+                                    gateway_host="gw.edu", gateway_port=2225)
+    assert "-N -L" in script, "Tunnel command must include -N (no-shell) flag"
+    assert "ssh -p 2225 -N" in script
+
+
+def test_notebook_sbatch_prints_token_explicitly(tmp_path):
+    """Token must be echoed before JupyterLab starts so users can copy it from
+    the job log without hunting through JupyterLab verbose startup output."""
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    assert "Token: $JUPYTER_TOKEN" in script
+    # Token echo must appear BEFORE the jupyter lab launch line
+    assert script.index("Token: $JUPYTER_TOKEN") < script.index("jupyter lab")
+
+
+def test_notebook_sbatch_prints_full_lab_url_with_token(tmp_path):
+    """The browser URL must include /lab?token= so users can paste it directly.
+    http://127.0.0.1:<port> alone requires a separate token step."""
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder, port=8888)
+    assert "/lab?token=$JUPYTER_TOKEN" in script
+    assert "http://127.0.0.1:8888/lab?token=$JUPYTER_TOKEN" in script
