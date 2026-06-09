@@ -285,7 +285,7 @@ def render_notebook_sbatch(
         launcher = (
             f"apptainer exec --nv --bind /shared {spec.container_image} "
             f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port={port} "
-            f"--notebook-dir=/shared --ServerApp.token=\"$JUPYTER_TOKEN\""
+            f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
     else:
         if spec.conda_env:
@@ -324,7 +324,7 @@ def render_notebook_sbatch(
 
         launcher = (
             f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port={port} "
-            f"--notebook-dir=/shared --ServerApp.token=\"$JUPYTER_TOKEN\""
+            f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
 
     lines += _NODE_ADDR_SNIPPET
@@ -334,11 +334,11 @@ def render_notebook_sbatch(
         "",
         "echo '================================================='",
         "echo 'JupyterLab is starting on the GPU node.'",
-        f"echo 'Token: $JUPYTER_TOKEN'",
+        'echo "Token: $JUPYTER_TOKEN"',
         "echo 'SSH tunnel — open a NEW terminal on YOUR LAPTOP and run:'",
         f'echo "  ssh -p {gateway_port} -N -L {port}:$IIT_NODE_ADDR:{port} $USER@{gateway_host}"',
         "echo '  (-N = tunnel only, no shell opens — terminal sitting idle is correct)'",
-        f"echo 'Then open in browser: http://127.0.0.1:{port}/lab?token=$JUPYTER_TOKEN'",
+        f'echo "Then open in browser: http://127.0.0.1:{port}/lab?token=$JUPYTER_TOKEN"',
         "echo '================================================='",
         "",
         launcher,

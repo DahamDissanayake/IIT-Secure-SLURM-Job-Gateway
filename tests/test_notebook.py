@@ -215,3 +215,27 @@ def test_notebook_sbatch_prints_full_lab_url_with_token(tmp_path):
     script = render_notebook_sbatch(spec, folder, port=8888)
     assert "/lab?token=$JUPYTER_TOKEN" in script
     assert "http://127.0.0.1:8888/lab?token=$JUPYTER_TOKEN" in script
+
+
+def test_notebook_sbatch_uses_identity_provider_token(tmp_path):
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    assert "--IdentityProvider.token=" in script
+    assert "--ServerApp.token" not in script
+
+
+def test_notebook_sbatch_token_echo_uses_double_quotes(tmp_path):
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    dq_token = chr(34) + "Token: " + chr(36) + "JUPYTER_TOKEN" + chr(34)
+    sq_token = chr(39) + "Token: " + chr(36) + "JUPYTER_TOKEN" + chr(39)
+    assert dq_token in script, "Token echo must use double quotes"
+    assert sq_token not in script, "Token echo must not use single quotes"
+    dq_url = chr(34) + "Then open in browser:"
+    sq_url = chr(39) + "Then open in browser:"
+    assert dq_url in script, "URL echo must use double quotes"
+    assert sq_url not in script, "URL echo must not use single quotes"
