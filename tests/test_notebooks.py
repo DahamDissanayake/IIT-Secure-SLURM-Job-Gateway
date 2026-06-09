@@ -71,3 +71,21 @@ def test_running_services_empty(monkeypatch):
     from iitgpu import notebooks
     with patch("iitgpu.notebooks.queue", return_value=[]):
         assert notebooks.running_services() == []
+
+
+def test_running_services_tunnel_uses_node_ip_not_localhost():
+    """Service tunnel hint must say <node-ip> not localhost — localhost would route
+    to the gateway itself, not the compute node where JupyterLab/TensorBoard runs."""
+    from iitgpu import notebooks
+    fake = [
+        QueueEntry("1", "notebook", "RUNNING", "gpu", "0:10", 1),
+        QueueEntry("2", "tensorboard", "RUNNING", "gpu", "0:10", 1),
+    ]
+    with patch("iitgpu.notebooks.queue", return_value=fake):
+        svcs = notebooks.running_services()
+    for s in svcs:
+        assert "localhost" not in s.tunnel, (
+            f"Service {s.name} tunnel hint contains localhost — users would forward "
+            "to the gateway rather than the compute node."
+        )
+        assert "node-ip" in s.tunnel or "node" in s.tunnel

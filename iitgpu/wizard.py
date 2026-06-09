@@ -42,7 +42,6 @@ _TASK_LABELS: dict[str, str] = {
     "inference":   "Run inference / generate output",
     "test":        "Quick test  (30 min, reduced resources)",
     "notebook":    "Notebook (JupyterLab)  — interactive GPU session",
-    "notebook-script": "Run a notebook (.ipynb) as a batch job  — executes it end-to-end",
     "interactive": "Interactive shell on the GPU node  (srun --pty)",
 }
 
@@ -597,10 +596,6 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     job_name = task_type
 
     if task_type != "notebook":
-        if task_type == "notebook-script":
-            info("Upload your notebook (.ipynb) AND its data/files now, using the")
-            info("SAME relative paths the notebook expects (e.g. ./data/...). You'll")
-            info("pick which .ipynb to run in the next step.")
         _prefill_dp = _tdefaults.get("data_path", "")
         data_choices = [
             "a) Pick an existing folder",
@@ -774,11 +769,19 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         success, result = submit_job(sbatch_path)
         if success:
             ok(f"Notebook job submitted! ID: {result}")
-            ok(
-                f"SSH tunnel: ssh -p {cfg.gateway_port} "
-                f"-L {nb_port}:localhost:{nb_port} {user}@{cfg.gateway_host}"
-            )
+            info("JupyterLab binds to the compute node's internal IP (resolved at runtime).")
+            info("The exact SSH tunnel command is printed in the job's output once it starts:")
+            info(f"  squeue --job {result}   (check state)  |  look at the job log for the tunnel line")
+            info(f"  Tunnel shape:  ssh -p {cfg.gateway_port} -L {nb_port}:<node-ip>:{nb_port} {user}@{cfg.gateway_host}")
             auditclient.log("notebook_submitted_ok", detail=job_name, job_id=result)
+            if questionary.confirm(
+                "Watch job output now for the tunnel command?", default=True, style=_STYLE
+            ).ask():
+                try:
+                    from iitgpu.dashboard import run_dashboard
+                    run_dashboard(job_id=result)
+                except ImportError:
+                    info("Live dashboard not available. Check job output with: squeue && cat <log>")
         else:
             err(f"Submission failed: {result}")
             auditclient.log("notebook_submit_failed", detail=result)
@@ -791,29 +794,9 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         if _prefill_sp and Path(_prefill_sp).exists() and _browse_jail(_prefill_sp):
             _start = str(Path(_prefill_sp).parent)
 
-        if task_type == "notebook-script":
-            info("Step 5 — Select the notebook (.ipynb) to run end-to-end:")
-            info("Make sure you uploaded it and its data above, with the paths the")
-            info("notebook expects. Results (executed.ipynb + .html) land in the job folder.")
-            script_path = _browse_script(_start, _browse_jail, exts=(".ipynb",))
-        else:
-            info("Step 5 — Select your job script (.py or .sh):")
-            script_path = _browse_script(_start, _browse_jail)
+        info("Step 5 — Select your job script (.py or .sh):")
+        script_path = _browse_script(_start, _browse_jail)
         if script_path is None:
-            return
-
-    # ── Step 5a: Notebook dependencies (install before running the .ipynb) ────
-    nb_requirements = nb_packages = ""
-    nb_auto_install = True
-    if task_type == "notebook-script" and script_path:
-        nb_requirements, nb_packages = _notebook_deps_prompt(
-            script_path, _browse_jail, _user_browse_start())
-        nb_auto_install = questionary.confirm(
-            "Auto-install any other missing imports during the run? "
-            "(recommended — catches deps like tensorboard automatically)",
-            default=True, style=_STYLE,
-        ).ask()
-        if nb_auto_install is None:
             return
 
     # ── Step 5b: Training config (train_cifar10.py special-case) ─────────────
@@ -845,19 +828,16 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     # ── Step 6: Arguments ─────────────────────────────────────────────────────
     from iitgpu.validate import clean_array_spec, clean_dependency
     args = ""
-    # nbconvert takes no user args (notebooks aren't parameterised here), so skip
-    # the prompt for the notebook-as-batch-job flow.
-    if task_type != "notebook-script":
-        _prefill_args = _tdefaults.get("extra_args", "")
-        raw_args = questionary.text(
-            "Step 6 — Extra arguments (blank = none):"
-            + (_prefill_hint if _prefill_args else ""),
-            default=_prefill_args,
-            style=_STYLE,
-        ).ask()
-        if raw_args is None:
-            return
-        args = clean_run_command(raw_args) if raw_args.strip() else ""
+    _prefill_args = _tdefaults.get("extra_args", "")
+    raw_args = questionary.text(
+        "Step 6 — Extra arguments (blank = none):"
+        + (_prefill_hint if _prefill_args else ""),
+        default=_prefill_args,
+        style=_STYLE,
+    ).ask()
+    if raw_args is None:
+        return
+    args = clean_run_command(raw_args) if raw_args.strip() else ""
 
     # ── Job array (optional) ──────────────────────────────────────────────────
     array_spec = ""
@@ -908,13 +888,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             warn("Invalid parent job ID — ignoring dependency.")
 
     # ── Build job spec ────────────────────────────────────────────────────────
-    if task_type == "notebook-script" and script_path:
-        from iitgpu.jobs import notebook_run_command
-        run_cmd = notebook_run_command(
-            script_path, in_container=bool(chosen_container),
-            requirements=nb_requirements, packages=nb_packages,
-            auto_install=nb_auto_install)
-    elif script_path and script_path.endswith(".py"):
+    if script_path and script_path.endswith(".py"):
         run_cmd = f"python {script_path}"
     elif script_path:
         run_cmd = f"bash {script_path}"

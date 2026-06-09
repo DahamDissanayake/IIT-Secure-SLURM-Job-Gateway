@@ -29,8 +29,8 @@ def running_services() -> list[Service]:
     for e in queue():
         if e.name in _SERVICE_NAMES:
             # Exact port lives in the job's stdout; show the generic tunnel shape.
-            tunnel = (f"ssh -p {cfg.gateway_port} -L <port>:localhost:<port> "
-                      f"<you>@{cfg.gateway_host}   (see job {e.job_id} output for the port)")
+            tunnel = (f"ssh -p {cfg.gateway_port} -L <port>:<node-ip>:<port> "
+                      f"<you>@{cfg.gateway_host}   (see job {e.job_id} output for the exact node IP + port)")
             out.append(Service(e.job_id, e.name, e.state, tunnel))
     return out
 
@@ -112,7 +112,8 @@ def launch_tensorboard() -> None:
     good, res = submit_job(sb)
     if good:
         ok(f"TensorBoard submitted! Job {res}")
-        ok(f"Tunnel: ssh -p {cfg.gateway_port} -L {port}:localhost:{port} "
-           f"{getpass.getuser()}@{cfg.gateway_host}")
+        info(f"TensorBoard binds to the compute node IP (resolved at runtime).")
+        info(f"Exact tunnel command is printed in job output — shape: ")
+        info(f"  ssh -p {cfg.gateway_port} -L {port}:<node-ip>:{port} {getpass.getuser()}@{cfg.gateway_host}")
     else:
         err(f"Submission failed: {res}")

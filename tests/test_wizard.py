@@ -410,40 +410,6 @@ def test_browse_helpers_default_jail_is_global_in_jail():
         assert getattr(default, "__name__", "") == "in_jail"
 
 
-def test_browse_script_exts_filter_selects_only_ipynb(tmp_path, monkeypatch):
-    """The notebook-as-batch-job flow reuses _browse_script with exts=('.ipynb',):
-    a .ipynb is pickable, while .py/.sh are filtered out of the picker."""
-    import iitgpu.wizard as wiz
-
-    d = Path(tmp_path)
-    (d / "analysis.ipynb").write_text("{}")
-    (d / "train.py").write_text("x")
-
-    # safe_listdir gates on the global nfs jail (tmp_path is outside it), so feed
-    # the entries directly to exercise the exts filter inside _browse_script.
-    monkeypatch.setattr(wiz, "safe_listdir", lambda p: ["analysis.ipynb", "train.py"])
-
-    seen = {}
-
-    def _capture_select(*a, **kw):
-        seen["choices"] = kw.get("choices", a[1] if len(a) > 1 else [])
-        return MagicMock(ask=lambda: "analysis.ipynb")
-
-    monkeypatch.setattr("questionary.select", _capture_select)
-    jail = lambda p: True
-    picked = wiz._browse_script(str(d), jail, exts=(".ipynb",))
-    assert picked == str(d / "analysis.ipynb")
-    assert "analysis.ipynb" in seen["choices"]
-    assert "train.py" not in seen["choices"]
-
-
-def test_notebook_script_task_type_is_offered():
-    """The new 'run a notebook as a batch job' option must appear in the menu."""
-    import iitgpu.wizard as wiz
-    assert "notebook-script" in wiz._TASK_LABELS
-    assert ".ipynb" in wiz._TASK_LABELS["notebook-script"]
-
-
 def test_valid_pkg_tokens_keeps_specs_drops_shell_metachars():
     from iitgpu.wizard import _valid_pkg_tokens
     assert _valid_pkg_tokens("tqdm wfdb==4.1 torch>=2.0 scikit-learn[extra]") == \
