@@ -134,17 +134,14 @@ def submit_job(script_path: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def queue(user: str | None = None) -> list[QueueEntry]:
+def queue(user: str | None = None, all_users: bool = False) -> list[QueueEntry]:
     if _demo_mode():
         return list(_DEMO_QUEUE)
-    # All jobs are submitted via `sudo -u daham sbatch`; query as daham to see
-    # them all.  %u only returns the SLURM owner ("daham"), and %j only returns
-    # the short --job-name ("train").  The output path (%o) encodes both the
-    # real gateway user and the full job-folder name, so we parse it instead.
-    # Use | separator so paths with spaces (rare but possible) don't break parsing.
     _eu = _effective_user()
     cmd = _gateway_prefix() + ["squeue", "--noheader",
-           "--format=%i|%j|%u|%T|%P|%M|%l|%D|%o", "-u", _eu]
+           "--format=%i|%j|%u|%T|%P|%M|%l|%D|%o"]
+    if not all_users:
+        cmd += ["-u", _eu]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         entries = []

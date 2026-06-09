@@ -68,3 +68,140 @@ def test_queue_entry_has_user_and_time_limit_defaults():
     e = QueueEntry("1", "job", "RUNNING", "gpu", "0:05", 1)
     assert e.user == "?"
     assert e.time_limit == "N/A"
+
+
+# ── Multi-user live view ───────────────────────────────────────────────────────
+
+def test_queue_all_users_drops_u_flag(monkeypatch):
+    """queue(all_users=True) must NOT pass -u to squeue so all users are visible."""
+    from unittest.mock import patch, MagicMock
+    monkeypatch.setenv("IIT_DEMO_MODE", "0")
+    captured = []
+    def fake_run(cmd, **kw):
+        captured.append(cmd)
+        r = MagicMock(); r.stdout = ""; r.returncode = 0
+        return r
+    with patch("subprocess.run", fake_run):
+        from iitgpu.slurm import queue
+        queue(all_users=True)
+    assert captured, "subprocess.run was not called"
+    assert "-u" not in captured[0], f"Found -u in all_users=True cmd: {captured[0]}"
+
+
+def test_queue_single_user_keeps_u_flag(monkeypatch):
+    """queue() (default) must still pass -u so results are scoped to the caller."""
+    from unittest.mock import patch, MagicMock
+    monkeypatch.setenv("IIT_DEMO_MODE", "0")
+    captured = []
+    def fake_run(cmd, **kw):
+        captured.append(cmd)
+        r = MagicMock(); r.stdout = ""; r.returncode = 0
+        return r
+    with patch("subprocess.run", fake_run):
+        from iitgpu.slurm import queue
+        queue(all_users=False)
+    assert "-u" in captured[0], f"-u missing from default queue() cmd: {captured[0]}"
+
+
+def test_jobs_table_own_job_shown_bold():
+    """The current user's running job should appear bold in the jobs table."""
+    from rich.console import Console
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_jobs_table
+    jobs = [QueueEntry("1", "my_train", "RUNNING", "gpu", "1:00", 1, user="alice")]
+    table = _build_jobs_table(jobs, 0, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(table)
+    rendered = cap.get()
+    assert "alice" in rendered
+
+
+def test_jobs_table_other_user_shown_dim():
+    """Another user's job should render with the user name visible."""
+    from rich.console import Console
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_jobs_table
+    jobs = [QueueEntry("2", "their_job", "RUNNING", "gpu", "2:00", 1, user="bob")]
+    table = _build_jobs_table(jobs, 0, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(table)
+    rendered = cap.get()
+    assert "bob" in rendered
+
+
+def test_build_layout_hides_log_for_other_users_job():
+    """Selecting another user's job must show 'output not shown', not their log."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    jobs = [QueueEntry("3", "other_job", "RUNNING", "gpu", "0:30", 1, user="carol")]
+    layout = _build_layout(jobs, 0, ["secret output"], "/tmp/slurm-3.out", None, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "secret output" not in rendered, "Other user log leaked into output"
+    assert "carol" in rendered
+
+
+def test_build_layout_shows_log_for_own_job():
+    """Selecting the current user's own job must show the job output lines."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    jobs = [QueueEntry("4", "my_job", "RUNNING", "gpu", "0:10", 1, user="alice")]
+    layout = _build_layout(
+        jobs, 0, ["epoch 1/10", "loss=0.5"], "/tmp/slurm-4.out", None, current_user="alice"
+    )
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "epoch 1/10" in rendered
+
+
+def test_build_layout_footer_cancel_shown_for_own_active_job():
+    """Footer must show C=cancel when selected job is the current user's active job."""
+    import re as _re
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    jobs = [QueueEntry("5", "train", "RUNNING", "gpu", "0:05", 1, user="alice")]
+    layout = _build_layout(jobs, 0, [], None, None, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "C=cancel" in plain
+
+
+def test_build_layout_footer_cancel_hidden_for_other_users_job():
+    """Footer must NOT show C=cancel when selected job belongs to another user."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    jobs = [QueueEntry("6", "their_train", "RUNNING", "gpu", "0:05", 1, user="bob")]
+    layout = _build_layout(jobs, 0, [], None, None, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "C=cancel" not in rendered
+
+
+def test_merged_jobs_calls_queue_with_all_users(monkeypatch):
+    """_merged_jobs must use queue(all_users=True) so every user's live jobs appear."""
+    from unittest.mock import patch
+    from iitgpu.dashboard import _merged_jobs
+    calls = []
+    def fake_queue(**kw):
+        calls.append(kw)
+        return []
+    with patch("iitgpu.dashboard.queue", fake_queue), \
+         patch("iitgpu.dashboard.recent_jobs", return_value=[]):
+        _merged_jobs("/tmp/fake_jobs")
+    assert calls and calls[0].get("all_users") is True, (
+        "_merged_jobs did not call queue(all_users=True): calls=%s" % calls
+    )

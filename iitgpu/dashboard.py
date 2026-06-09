@@ -13,7 +13,7 @@ from rich.table import Table
 from rich import box
 
 from iitgpu.config import load_config, jobs_dir
-from iitgpu.slurm import NodeStats, QueueEntry, cancel, get_node_stats, queue, recent_jobs
+from iitgpu.slurm import NodeStats, QueueEntry, cancel, get_node_stats, queue, recent_jobs, _effective_user
 from iitgpu.ui import console, err, ok
 
 try:
@@ -134,15 +134,15 @@ def _build_cluster_panel(stats: NodeStats | None) -> Panel:
 
 # ── Jobs table ────────────────────────────────────────────────────────────────
 
-def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int) -> Table:
+def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: str) -> Table:
     table = Table(
         show_header=True, header_style="bold cyan",
         box=box.SIMPLE, expand=True, show_edge=False,
     )
     table.add_column("",        width=2)
     table.add_column("ID",      style="magenta", width=7,  no_wrap=True)
-    table.add_column("User",    width=8,  no_wrap=True)
-    table.add_column("Name",    width=22, no_wrap=True)
+    table.add_column("User",    width=9,  no_wrap=True)
+    table.add_column("Name",    width=21, no_wrap=True)
     table.add_column("State",   width=14, no_wrap=True)
     table.add_column("Elapsed", width=9,  no_wrap=True)
     table.add_column("Part",    width=5,  no_wrap=True)
@@ -179,31 +179,38 @@ def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int) -> Table:
             )
         elif j.state in ("RUNNING", "COMPLETING"):
             label = "RUNNING" if j.state == "RUNNING" else "FINISHING"
+            is_own = j.user == current_user
+            run_color = "green" if is_own else "cyan"
+            user_markup = f"[bold]{j.user[:8]}[/]" if is_own else f"[dim]{j.user[:8]}[/]"
             table.add_row(
                 prefix,
                 j.job_id,
-                j.user[:7],
-                j.name[:21],
-                f"[green]{spin} {label}[/]",
+                user_markup,
+                j.name[:20],
+                f"[{run_color}]{spin} {label}[/]",
                 f"[dim]{j.time_used}[/]",
                 f"[dim]{j.partition}[/]",
             )
         elif j.state == "PENDING":
+            is_own = j.user == current_user
+            user_markup = f"[bold]{j.user[:8]}[/]" if is_own else f"[dim]{j.user[:8]}[/]"
             table.add_row(
                 prefix,
                 j.job_id,
-                j.user[:7],
-                j.name[:21],
+                user_markup,
+                j.name[:20],
                 "[yellow]⋯ PENDING[/]",
                 "[dim]─[/]",
                 f"[dim]{j.partition}[/]",
             )
         else:
+            is_own = j.user == current_user
+            user_markup = f"[bold]{j.user[:8]}[/]" if is_own else f"[dim]{j.user[:8]}[/]"
             table.add_row(
                 prefix,
                 j.job_id,
-                j.user[:7],
-                j.name[:21],
+                user_markup,
+                j.name[:20],
                 f"[dim]{j.state}[/]",
                 f"[dim]{j.time_used}[/]",
                 f"[dim]{j.partition}[/]",
@@ -220,6 +227,7 @@ def _build_layout(
     log_lines: list[str],
     log_path: str | None,
     node_stats: NodeStats | None,
+    current_user: str = "",
 ) -> Layout:
     layout = Layout()
     jobs_height = min(len(jobs) + 6, 16)
@@ -235,7 +243,7 @@ def _build_layout(
 
     if jobs:
         layout["jobs"].update(
-            Panel(_build_jobs_table(jobs, selected_idx),
+            Panel(_build_jobs_table(jobs, selected_idx, current_user),
                   title="[bold]Job Queue[/bold]", border_style="cyan")
         )
     else:
@@ -245,11 +253,14 @@ def _build_layout(
         )
 
     selected_job = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
+    is_own_job = selected_job is not None and selected_job.user == current_user
     log_title = f"Output: {log_path}" if log_path else "Output"
-    if log_lines:
-        log_body = "\n".join(log_lines)
-    elif selected_job is None:
+    if not selected_job:
         log_body = "[dim]No job selected.[/]"
+    elif not is_own_job:
+        log_body = f"[dim]{selected_job.user}'s job — output not shown.[/dim]"
+    elif log_lines:
+        log_body = "\n".join(log_lines)
     elif selected_job.state == "FAILED":
         log_body = "[red]Job failed — output not yet visible. Press R to refresh.[/]"
     elif selected_job.state == "COMPLETED":
@@ -258,8 +269,10 @@ def _build_layout(
         log_body = "[dim]Waiting for job to start...[/]"
 
     layout["log"].update(Panel(log_body, title=log_title, border_style="cyan"))
+    can_cancel = is_own_job and selected_job and selected_job.state not in ("COMPLETED", "FAILED", "CANCELLED")
+    cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     layout["footer"].update(
-        "[dim]  Q=quit   S=switch job   C=cancel selected   R=refresh now[/]"
+        f"[dim]  Q=quit   S=switch job   {cancel_hint}[dim]   R=refresh now[/dim]"
     )
     return layout
 
@@ -400,7 +413,7 @@ def _wait_key(timeout: float) -> str | None:
 # ── Merged job list ───────────────────────────────────────────────────────────
 
 def _merged_jobs(jdir: str) -> list[QueueEntry]:
-    live = queue()
+    live = queue(all_users=True)
     live_ids = {j.job_id for j in live}
     done = [j for j in recent_jobs(jdir, limit=_COMPLETED_HISTORY) if j.job_id not in live_ids]
     return live + done
@@ -412,6 +425,7 @@ def run_dashboard(job_id: str | None = None) -> None:
     """Show the live job dashboard. If job_id given, start with that job selected."""
     cfg = load_config()
     jdir = jobs_dir(cfg)
+    current_user = _effective_user()
 
     jobs: list[QueueEntry] = _merged_jobs(jdir)
     selected_idx = 0
@@ -435,7 +449,10 @@ def run_dashboard(job_id: str | None = None) -> None:
         if jobs and selected_idx >= len(jobs):
             selected_idx = len(jobs) - 1
         sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
-        lookup_id = sel.job_id if sel else pinned_job_id
+        is_own = sel and sel.user == current_user
+        lookup_id = sel.job_id if is_own else None
+        if lookup_id is None and pinned_job_id:
+            lookup_id = pinned_job_id
         if lookup_id:
             lines, path = _get_job_output(lookup_id, jdir)
         else:
@@ -461,6 +478,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                     jobs, selected_idx,
                     _log_lines[0], _log_path_ref[0],
                     _node_stats[0],
+                    current_user,
                 ))
 
                 key = _wait_key(1.0 / _DISPLAY_FPS)
@@ -472,7 +490,12 @@ def run_dashboard(job_id: str | None = None) -> None:
                     _refresh_data()
                 elif key == "c":
                     sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
-                    if sel:
+                    if sel and sel.user != current_user:
+                        live.stop()
+                        err(f"Job {sel.job_id} belongs to {sel.user} — you can only cancel your own jobs.")
+                        import time as _t; _t.sleep(1.5)
+                        live.start()
+                    elif sel:
                         live.stop()
                         import questionary
                         from questionary import Style
