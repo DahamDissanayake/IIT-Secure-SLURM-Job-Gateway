@@ -37,11 +37,11 @@ _STYLE = Style([
 ])
 
 _TASK_LABELS: dict[str, str] = {
+    "notebook":    "Notebook (JupyterLab)  — interactive GPU session",
     "train":       "Train from scratch",
     "finetune":    "Fine-tune a model",
     "inference":   "Run inference / generate output",
     "test":        "Quick test  (30 min, reduced resources)",
-    "notebook":    "Notebook (JupyterLab)  — interactive GPU session",
     "interactive": "Interactive shell on the GPU node  (srun --pty)",
 }
 

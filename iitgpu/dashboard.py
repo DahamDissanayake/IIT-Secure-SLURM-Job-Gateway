@@ -86,13 +86,13 @@ def _find_job_log(job_id: str, search_root: str) -> str | None:
     return None
 
 
-def _get_job_output(job_id: str, jdir: str, lines: int = 20) -> tuple[list[str], str | None]:
+def _get_job_output(job_id: str, jdir: str, lines: int = 500) -> tuple[list[str], str | None]:
     log_path = _find_job_log(job_id, jdir)
     if log_path is None:
         return [], None
     out_lines = _get_log_tail(log_path, lines=lines)
     err_path = str(Path(log_path).with_suffix(".err"))
-    err_lines = _get_log_tail(err_path, lines=15)
+    err_lines = _get_log_tail(err_path, lines=100)
     if err_lines:
         combined = err_lines + (["", "[dim]── stdout ──[/dim]"] + out_lines if out_lines else [])
     else:
@@ -254,6 +254,7 @@ def _build_layout(
     node_stats: NodeStats | None,
     current_user: str = "",
     is_jupyter: bool = False,
+    log_scroll: int = 0,
 ) -> Layout:
     layout = Layout()
     jobs_height = min(len(jobs) + 6, 16)
@@ -286,7 +287,15 @@ def _build_layout(
     elif not is_own_job:
         log_body = f"[dim]{selected_job.user}'s job — output not shown.[/dim]"
     elif log_lines:
-        log_body = "\n".join(log_lines)
+        panel_h = max(3, console.height - jobs_height - 6)
+        total = len(log_lines)
+        scroll = min(log_scroll, max(0, total - panel_h))
+        start = max(0, total - panel_h - scroll)
+        visible = log_lines[start:start + panel_h]
+        if start > 0:
+            log_body = f"[dim]↑ {start} lines above  (↑↓ arrows to scroll)[/dim]\n" + "\n".join(visible)
+        else:
+            log_body = "\n".join(visible)
     elif selected_job.state == "FAILED":
         log_body = "[red]Job failed — output not yet visible. Press R to refresh.[/]"
     elif selected_job.state == "COMPLETED":
@@ -301,7 +310,7 @@ def _build_layout(
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
     layout["footer"].update(
-        f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh[/dim]"
+        f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh   ↑↓=scroll output[/dim]"
     )
     return layout
 
@@ -433,7 +442,20 @@ def _wait_key(timeout: float) -> str | None:
     try:
         r, _, _ = select.select([sys.stdin], [], [], timeout)
         if r:
-            return sys.stdin.read(1).lower()
+            ch = sys.stdin.read(1)
+            if ch == '\x1b':
+                r2, _, _ = select.select([sys.stdin], [], [], 0.05)
+                if r2:
+                    ch2 = sys.stdin.read(1)
+                    if ch2 == '[':
+                        r3, _, _ = select.select([sys.stdin], [], [], 0.05)
+                        if r3:
+                            ch3 = sys.stdin.read(1)
+                            if ch3 == 'A':
+                                return 'up'
+                            if ch3 == 'B':
+                                return 'down'
+                return ch.lower()
     except (OSError, ValueError):
         pass
     return None
@@ -471,6 +493,7 @@ def run_dashboard(job_id: str | None = None) -> None:
     _log_path_ref: list[str | None]       = [None]
     _last_data_ts: list[float]            = [0.0]
     _is_jupyter:   list[bool]             = [False]
+    _log_scroll:   list[int]              = [0]
     _warned_jobs:  set[str]               = set()    # job IDs already warned
 
     def _refresh_data() -> None:
@@ -536,14 +559,20 @@ def run_dashboard(job_id: str | None = None) -> None:
                     _node_stats[0],
                     current_user,
                     _is_jupyter[0],
+                    _log_scroll[0],
                 ))
 
                 key = _wait_key(1.0 / _DISPLAY_FPS)
 
                 if key == "q":
                     break
+                elif key == "up":
+                    _log_scroll[0] += 3
+                elif key == "down":
+                    _log_scroll[0] = max(0, _log_scroll[0] - 3)
                 elif key == "s" and jobs:
                     selected_idx = (selected_idx + 1) % len(jobs)
+                    _log_scroll[0] = 0
                     _refresh_data()
                 elif key == "c":
                     sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
@@ -595,6 +624,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                         _refresh_data()
                         live.start()
                 elif key == "r":
+                    _log_scroll[0] = 0
                     _refresh_data()
 
                 if time.monotonic() - _last_data_ts[0] >= _DATA_REFRESH_SECS:
