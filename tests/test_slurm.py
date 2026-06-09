@@ -242,3 +242,45 @@ def test_sacct_history_accepts_days_param():
     with patch("subprocess.run", side_effect=fake_run):
         sacct_history(days=7)
     assert "now-7days" in " ".join(captured["cmd"])
+
+
+# ── extend_job_time ────────────────────────────────────────────────────────────
+
+def test_extend_job_time_calls_scontrol_update(monkeypatch):
+    """extend_job_time must call scontrol update with the correct TimeLimit arg."""
+    from unittest.mock import patch, MagicMock
+    monkeypatch.setenv("DEMO_MODE", "0")
+    captured = []
+    def fake_run(cmd, **kw):
+        captured.append(cmd)
+        r = MagicMock(); r.returncode = 0; r.stderr = ""
+        return r
+    with patch("subprocess.run", fake_run):
+        from iitgpu.slurm import extend_job_time
+        ok, msg = extend_job_time("42", extra_hours=2)
+    assert ok
+    assert any("scontrol" in str(c) for c in captured)
+    full_cmd = " ".join(captured[0])
+    assert "TimeLimit=+02:00:00" in full_cmd
+
+
+def test_extend_job_time_returns_false_on_failure(monkeypatch):
+    from unittest.mock import patch, MagicMock
+    monkeypatch.setenv("DEMO_MODE", "0")
+    def fake_run(cmd, **kw):
+        r = MagicMock(); r.returncode = 1; r.stderr = "Access denied"
+        return r
+    with patch("subprocess.run", fake_run):
+        from iitgpu.slurm import extend_job_time
+        ok, msg = extend_job_time("99")
+    assert not ok
+    assert "Access denied" in msg
+
+
+def test_extend_job_time_demo_mode(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "1")
+    import importlib, iitgpu.slurm as _sm; importlib.reload(_sm)
+    from iitgpu.slurm import extend_job_time
+    ok, msg = extend_job_time("7", 3)
+    assert ok
+    assert "demo" in msg

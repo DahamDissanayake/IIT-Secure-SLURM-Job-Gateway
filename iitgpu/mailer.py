@@ -343,3 +343,133 @@ def send_login_notification(username: str, email: str, remote_ip: str) -> None:
     # Login notice: daemon forces recipient to the caller's own address and does
     # new-IP dedup server-side (only sends when remote_ip is unseen).
     _fire(email, subject, html, bcc=None, kind="login", ip=remote_ip or "local")
+
+
+def send_jupyter_warning(
+    to: str,
+    job_id: str,
+    job_name: str,
+    time_left_mins: int,
+    gateway_host: str = "",
+    gateway_port: int | str = 22,
+) -> tuple[bool, str]:
+    """30-minute warning email for a running JupyterLab session."""
+    subject = f"[{_cluster_name()}] JupyterLab session ending in ~{time_left_mins} min — job #{job_id}"
+    accent  = "#F59E0B"
+    tip_cmd = f"ssh -p {gateway_port} {to.split('@')[0] if '@' in to else 'you'}@{gateway_host}" if gateway_host else "iit-gpu-manager"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F4F5;padding:40px 0">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%">
+  <tr><td bgcolor="{accent}" style="background:{accent};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
+  <tr><td bgcolor="#111827" style="background:#111827;padding:28px 32px 26px">
+    <p style="margin:0 0 20px;color:#4B5563;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase">{_cluster_name()}</p>
+    <h1 style="margin:0 0 8px;color:#F9FAFB;font-size:22px;font-weight:600;letter-spacing:-0.3px">JupyterLab session ending soon</h1>
+    <p style="margin:0;color:#9CA3AF;font-size:14px;line-height:1.6">Your interactive GPU session has approximately <strong style="color:#FCD34D">{time_left_mins} minutes</strong> remaining.</p>
+    <table cellpadding="0" cellspacing="0" style="margin-top:20px">
+      <tr><td bgcolor="#1F2937" style="background:#1F2937;border-radius:4px;padding:5px 12px">
+        <span style="color:{accent};font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">TIME WARNING</span>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:28px 32px">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Job ID</td>
+        <td style="padding:10px 0 10px 20px;color:#111827;font-size:13px;font-family:monospace;border-bottom:1px solid #F3F4F6">{job_id}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Job Name</td>
+        <td style="padding:10px 0 10px 20px;color:#111827;font-size:13px;font-family:monospace;border-bottom:1px solid #F3F4F6">{job_name}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Time Left</td>
+        <td style="padding:10px 0 10px 20px;color:#F59E0B;font-size:13px;font-weight:700;font-family:monospace;border-bottom:1px solid #F3F4F6">~{time_left_mins} minutes</td>
+      </tr>
+    </table>
+    <div style="margin-top:20px;border-left:3px solid {accent};padding:14px 18px;background:#FFFBEB">
+      <p style="margin:0 0 6px;color:#92400E;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">Need more time?</p>
+      <p style="margin:0;color:#78350F;font-size:13px;line-height:1.7">
+        Open <strong>iit-gpu-manager</strong> → <strong>Live Monitor</strong>, select your job, and press <strong>E</strong> to add 2 more hours.
+        Save your work in JupyterLab before the session ends.
+      </p>
+      <p style="margin:10px 0 0;color:#78350F;font-size:12px;font-family:monospace">Connect: {tip_cmd}</p>
+    </div>
+  </td></tr>
+  <tr><td bgcolor="#F4F4F5" style="background:#F4F4F5;padding:18px 32px;border-top:1px solid #E4E4E7">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="color:#A1A1AA;font-size:11px">{_cluster_name()}&nbsp;&middot;&nbsp;{_now_lk()} (GMT+5:30)</td>
+        <td align="right" style="color:#A1A1AA;font-size:11px;font-family:monospace">iit-gpu-manager</td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>"""
+    return _send_sync(to, subject, html, kind="jupyter_warning")
+
+
+def send_jupyter_extended(
+    to: str,
+    job_id: str,
+    job_name: str,
+    new_time_limit: str,
+    extra_hours: int = 2,
+) -> tuple[bool, str]:
+    """Confirmation email after a JupyterLab session is extended."""
+    subject = f"[{_cluster_name()}] JupyterLab session extended +{extra_hours}h — job #{job_id}"
+    accent  = "#22C55E"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F4F5;padding:40px 0">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%">
+  <tr><td bgcolor="{accent}" style="background:{accent};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
+  <tr><td bgcolor="#111827" style="background:#111827;padding:28px 32px 26px">
+    <p style="margin:0 0 20px;color:#4B5563;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase">{_cluster_name()}</p>
+    <h1 style="margin:0 0 8px;color:#F9FAFB;font-size:22px;font-weight:600;letter-spacing:-0.3px">Session extended by +{extra_hours}h</h1>
+    <p style="margin:0;color:#9CA3AF;font-size:14px;line-height:1.6">Your JupyterLab session has been successfully extended.</p>
+    <table cellpadding="0" cellspacing="0" style="margin-top:20px">
+      <tr><td bgcolor="#1F2937" style="background:#1F2937;border-radius:4px;padding:5px 12px">
+        <span style="color:{accent};font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">EXTENDED</span>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:28px 32px">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Job ID</td>
+        <td style="padding:10px 0 10px 20px;color:#111827;font-size:13px;font-family:monospace;border-bottom:1px solid #F3F4F6">{job_id}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Job Name</td>
+        <td style="padding:10px 0 10px 20px;color:#111827;font-size:13px;font-family:monospace;border-bottom:1px solid #F3F4F6">{job_name}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:1px solid #F3F4F6">Added</td>
+        <td style="padding:10px 0 10px 20px;color:{accent};font-size:13px;font-weight:700;font-family:monospace;border-bottom:1px solid #F3F4F6">+{extra_hours} hours</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;width:120px;border-bottom:none">New Limit</td>
+        <td style="padding:10px 0 10px 20px;color:#111827;font-size:13px;font-family:monospace;border-bottom:none">{new_time_limit}</td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td bgcolor="#F4F4F5" style="background:#F4F4F5;padding:18px 32px;border-top:1px solid #E4E4E7">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="color:#A1A1AA;font-size:11px">{_cluster_name()}&nbsp;&middot;&nbsp;{_now_lk()} (GMT+5:30)</td>
+        <td align="right" style="color:#A1A1AA;font-size:11px;font-family:monospace">iit-gpu-manager</td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>"""
+    return _send_sync(to, subject, html, kind="jupyter_extended")

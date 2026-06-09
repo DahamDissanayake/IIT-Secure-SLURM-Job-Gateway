@@ -507,6 +507,23 @@ def cancel(job_id: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def extend_job_time(job_id: str, extra_hours: int = 2) -> tuple[bool, str]:
+    """Extend a running job's time limit by extra_hours (calls scontrol update)."""
+    if _demo_mode():
+        return True, f"Job {job_id} extended by {extra_hours}h (demo)"
+    cmd = _gateway_prefix() + [
+        "scontrol", "update", f"JobId={job_id}",
+        f"TimeLimit=+{extra_hours:02d}:00:00",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            return True, f"Job {job_id} extended by {extra_hours}h"
+        return False, r.stderr.strip() or "scontrol update failed"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+
+
 # ── Job control + detail (Phase 3) ─────────────────────────────────────────────
 
 def _scontrol_action(action: str, job_id: str) -> tuple[bool, str]:

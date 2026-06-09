@@ -13,7 +13,7 @@ from rich.table import Table
 from rich import box
 
 from iitgpu.config import load_config, jobs_dir
-from iitgpu.slurm import NodeStats, QueueEntry, cancel, get_node_stats, queue, recent_jobs, _effective_user
+from iitgpu.slurm import NodeStats, QueueEntry, cancel, extend_job_time, get_node_stats, queue, recent_jobs, _effective_user
 from iitgpu.ui import console, err, ok
 
 try:
@@ -100,6 +100,25 @@ def _get_job_output(job_id: str, jdir: str, lines: int = 20) -> tuple[list[str],
     return combined, log_path
 
 
+def _time_remaining(job: QueueEntry) -> int | None:
+    """Seconds remaining for a running job with a time limit; None otherwise."""
+    if job.state not in ("RUNNING", "COMPLETING"):
+        return None
+    limit = _slurm_time_to_secs(job.time_limit)
+    used  = _slurm_time_to_secs(job.time_used)
+    if limit is None or used is None:
+        return None
+    return max(0, limit - used)
+
+
+def _is_jupyter_job(job_id: str, jdir: str) -> bool:
+    """True when the job folder contains the .iit-jupyter marker file."""
+    log_path = _find_job_log(job_id, jdir)
+    if log_path is None:
+        return False
+    return (Path(log_path).parent / ".iit-jupyter").exists()
+
+
 # ── Cluster panel (compact summary bar) ──────────────────────────────────────
 
 def _build_cluster_panel(stats: NodeStats | None) -> Panel:
@@ -144,7 +163,7 @@ def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: s
     table.add_column("User",    width=9,  no_wrap=True)
     table.add_column("Name",    width=21, no_wrap=True)
     table.add_column("State",   width=14, no_wrap=True)
-    table.add_column("Elapsed", width=9,  no_wrap=True)
+    table.add_column("Time Left", width=9,  no_wrap=True)
     table.add_column("Part",    width=5,  no_wrap=True)
 
     spin = _SPINNERS[int(time.monotonic() * _DISPLAY_FPS) % len(_SPINNERS)]
@@ -182,13 +201,19 @@ def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: s
             is_own = j.user == current_user
             run_color = "green" if is_own else "cyan"
             user_markup = f"[bold]{j.user[:8]}[/]" if is_own else f"[dim]{j.user[:8]}[/]"
+            remaining = _time_remaining(j)
+            if remaining is not None:
+                t_color = "red" if remaining < 1800 else "yellow" if remaining < 3600 else "green"
+                time_cell = f"[{t_color}]{_fmt_duration(remaining)}[/]"
+            else:
+                time_cell = f"[dim]∞ {j.time_used}[/]"
             table.add_row(
                 prefix,
                 j.job_id,
                 user_markup,
                 j.name[:20],
                 f"[{run_color}]{spin} {label}[/]",
-                f"[dim]{j.time_used}[/]",
+                time_cell,
                 f"[dim]{j.partition}[/]",
             )
         elif j.state == "PENDING":
@@ -228,6 +253,7 @@ def _build_layout(
     log_path: str | None,
     node_stats: NodeStats | None,
     current_user: str = "",
+    is_jupyter: bool = False,
 ) -> Layout:
     layout = Layout()
     jobs_height = min(len(jobs) + 6, 16)
@@ -270,9 +296,12 @@ def _build_layout(
 
     layout["log"].update(Panel(log_body, title=log_title, border_style="cyan"))
     can_cancel = is_own_job and selected_job and selected_job.state not in ("COMPLETED", "FAILED", "CANCELLED")
+    can_extend = (is_own_job and is_jupyter
+                  and selected_job and selected_job.state == "RUNNING")
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
+    extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
     layout["footer"].update(
-        f"[dim]  Q=quit   S=switch job   {cancel_hint}[dim]   R=refresh now[/dim]"
+        f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh[/dim]"
     )
     return layout
 
@@ -441,6 +470,8 @@ def run_dashboard(job_id: str | None = None) -> None:
     _log_lines:    list[list[str]]        = [[]]
     _log_path_ref: list[str | None]       = [None]
     _last_data_ts: list[float]            = [0.0]
+    _is_jupyter:   list[bool]             = [False]
+    _warned_jobs:  set[str]               = set()    # job IDs already warned
 
     def _refresh_data() -> None:
         nonlocal jobs, selected_idx
@@ -460,6 +491,31 @@ def run_dashboard(job_id: str | None = None) -> None:
         _log_lines[0]    = lines
         _log_path_ref[0] = path
         _last_data_ts[0] = time.monotonic()
+        # detect jupyter + 30-min warning (own jobs only)
+        if sel and is_own and sel.job_id:
+            _is_jupyter[0] = _is_jupyter_job(sel.job_id, jdir)
+            remaining = _time_remaining(sel)
+            if (remaining is not None
+                    and remaining < 1800
+                    and sel.job_id not in _warned_jobs
+                    and sel.state == "RUNNING"):
+                _warned_jobs.add(sel.job_id)
+                try:
+                    from iitgpu import daemonclient as _dc
+                    from iitgpu import mailer as _mailer
+                    _email = _dc.email_for(current_user)
+                    if _email:
+                        from iitgpu.config import load_config as _lcfg
+                        _cfg2 = _lcfg()
+                        _mailer.send_jupyter_warning(
+                            _email, sel.job_id, sel.name,
+                            max(1, remaining // 60),
+                            _cfg2.gateway_host, int(_cfg2.gateway_port),
+                        )
+                except Exception:
+                    pass
+        else:
+            _is_jupyter[0] = False
 
     _refresh_data()
 
@@ -479,6 +535,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                     _log_lines[0], _log_path_ref[0],
                     _node_stats[0],
                     current_user,
+                    _is_jupyter[0],
                 ))
 
                 key = _wait_key(1.0 / _DISPLAY_FPS)
@@ -509,6 +566,33 @@ def run_dashboard(job_id: str | None = None) -> None:
                             if success:
                                 from iitgpu import auditclient as _audit
                                 _audit.log("job_cancel", detail="dashboard", job_id=sel.job_id)
+                        live.start()
+                elif key == "e":
+                    sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
+                    if sel and sel.user == current_user and _is_jupyter[0] and sel.state == "RUNNING":
+                        live.stop()
+                        success, msg = extend_job_time(sel.job_id, 2)
+                        (ok if success else err)(msg)
+                        if success:
+                            try:
+                                from iitgpu import daemonclient as _dc2
+                                from iitgpu import mailer as _m2
+                                _email2 = _dc2.email_for(current_user)
+                                if _email2:
+                                    from iitgpu.slurm import show_job as _sj
+                                    _details = _sj(sel.job_id)
+                                    _new_lim = "unknown"
+                                    for _line in _details.splitlines():
+                                        if "TimeLimit=" in _line:
+                                            _new_lim = _line.split("TimeLimit=")[1].split()[0]
+                                            break
+                                    _m2.send_jupyter_extended(_email2, sel.job_id, sel.name, _new_lim, 2)
+                            except Exception:
+                                pass
+                            from iitgpu import auditclient as _audit2
+                            _audit2.log("jupyter_extend", detail="+2h", job_id=sel.job_id)
+                        import time as _t2; _t2.sleep(0.8)
+                        _refresh_data()
                         live.start()
                 elif key == "r":
                     _refresh_data()

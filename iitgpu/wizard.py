@@ -703,8 +703,19 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
 
     # ── Step 5: Notebook config OR Script ─────────────────────────────────────
     if task_type == "notebook":
+        dur_choice = questionary.select(
+            "Step 5 — How long do you need the GPU session?",
+            choices=["2 hours", "4 hours", "6 hours (Recommended)", "8 hours"],
+            default="6 hours (Recommended)",
+            style=_STYLE,
+        ).ask()
+        if dur_choice is None:
+            return
+        nb_hours = int(dur_choice.split()[0])
+        nb_time_limit = f"{nb_hours:02d}:00:00"
+
         port_str = questionary.text(
-            "Step 5 — JupyterLab port (on the GPU node):", default="8888", style=_STYLE
+            "Step 6 — JupyterLab port (on the GPU node):", default="8888", style=_STYLE
         ).ask()
         if port_str is None:
             return
@@ -724,7 +735,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             gpus=defaults.gpus,
             cpus=defaults.cpus,
             mem_gb=defaults.mem_gb,
-            time_limit=defaults.time_limit,
+            time_limit=nb_time_limit,
             run_command="",
             task_type=task_type,
             conda_env=chosen_env.path if chosen_env and chosen_env.kind == "conda" else "",
@@ -739,6 +750,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             if _registered_email:
                 spec.mail_user = _registered_email
         folder = make_job_folder(jdir, spec)
+        (Path(folder) / ".iit-jupyter").write_text("")  # marks this job as a JupyterLab session
         from iitgpu.jobs import render_notebook_sbatch
         script_text = render_notebook_sbatch(
             spec, folder, port=nb_port,
@@ -768,7 +780,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
 
         success, result = submit_job(sbatch_path)
         if success:
-            ok(f"Notebook job submitted! ID: {result}")
+            ok(f"Notebook job submitted! ID: {result}  ({nb_hours}h session)")
             info("JupyterLab binds to the compute node's internal IP (resolved at runtime).")
             info("The exact SSH tunnel command is printed in the job's output once it starts:")
             info(f"  squeue --job {result}   (check state)  |  look at the job log for the tunnel line")

@@ -205,3 +205,108 @@ def test_merged_jobs_calls_queue_with_all_users(monkeypatch):
     assert calls and calls[0].get("all_users") is True, (
         "_merged_jobs did not call queue(all_users=True): calls=%s" % calls
     )
+
+
+# ── Countdown / time-remaining ────────────────────────────────────────────────
+
+def test_time_remaining_running_job_returns_correct():
+    """For a running job with 4h limit and 1h elapsed, remaining should be 3h."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _time_remaining
+    j = QueueEntry("1", "train", "RUNNING", "gpu", "1:00:00", 1,
+                   user="alice", time_limit="4:00:00")
+    assert _time_remaining(j) == 3 * 3600
+
+
+def test_time_remaining_no_limit_returns_none():
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _time_remaining
+    j = QueueEntry("2", "train", "RUNNING", "gpu", "1:00:00", 1,
+                   user="alice", time_limit="N/A")
+    assert _time_remaining(j) is None
+
+
+def test_time_remaining_completed_returns_none():
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _time_remaining
+    j = QueueEntry("3", "train", "COMPLETED", "gpu", "2:00:00", 1,
+                   user="alice", time_limit="4:00:00")
+    assert _time_remaining(j) is None
+
+
+def test_is_jupyter_job_detects_marker(tmp_path):
+    """_is_jupyter_job returns True when .iit-jupyter exists in the job folder."""
+    log = tmp_path / "slurm-10.out"
+    log.write_text("JupyterLab running")
+    (tmp_path / ".iit-jupyter").write_text("")
+    from iitgpu.dashboard import _is_jupyter_job
+    assert _is_jupyter_job("10", str(tmp_path)) is True
+
+
+def test_is_jupyter_job_no_marker_returns_false(tmp_path):
+    log = tmp_path / "slurm-11.out"
+    log.write_text("regular job")
+    from iitgpu.dashboard import _is_jupyter_job
+    assert _is_jupyter_job("11", str(tmp_path)) is False
+
+
+def test_jobs_table_shows_countdown_for_time_limited_job():
+    """Running job with time limit should display countdown, not elapsed."""
+    from rich.console import Console
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_jobs_table
+    j = QueueEntry("5", "lab-alice", "RUNNING", "gpu", "0:30:00", 1,
+                   user="alice", time_limit="4:00:00")
+    table = _build_jobs_table([j], 0, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(table)
+    rendered = cap.get()
+    # Countdown for 4h - 0.5h = 3.5h = 3:30:00
+    assert "3:30:00" in rendered or "3:29" in rendered
+
+
+def test_jobs_table_shows_infinity_for_no_limit_job():
+    """Running job without time limit should show elapsed with infinity symbol."""
+    from rich.console import Console
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_jobs_table
+    j = QueueEntry("6", "train", "RUNNING", "gpu", "1:30:00", 1,
+                   user="alice", time_limit="N/A")
+    table = _build_jobs_table([j], 0, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(table)
+    rendered = cap.get()
+    assert "∞" in rendered
+
+
+def test_build_layout_extend_hint_shown_for_jupyter():
+    """Footer must show E=+2h when an own running JupyterLab job is selected."""
+    import re as _re
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    j = QueueEntry("7", "lab-session", "RUNNING", "gpu", "0:10:00", 1,
+                   user="alice", time_limit="2:00:00")
+    layout = _build_layout([j], 0, [], None, None, current_user="alice", is_jupyter=True)
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "E=+2h" in plain
+
+
+def test_build_layout_extend_hint_hidden_for_non_jupyter():
+    """Footer must NOT show E=+2h for a regular (non-JupyterLab) job."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    j = QueueEntry("8", "train", "RUNNING", "gpu", "0:10:00", 1,
+                   user="alice", time_limit="4:00:00")
+    layout = _build_layout([j], 0, [], None, None, current_user="alice", is_jupyter=False)
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "E=+2h" not in rendered
