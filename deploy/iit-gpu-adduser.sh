@@ -117,11 +117,21 @@ step "Creating $NFS_ROOT/users/$USERNAME on the NFS server (GPU host) ..."
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$NEW_UID $NFS_ROOT/users/$USERNAME && \
     sudo chmod 0700 $NFS_ROOT/users/$USERNAME\""
-run "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared 2>/dev/null || true"
+
+# Shell users get ~/shared → NFS root so they can reach datasets, models, envs,
+# AND their private area at ~/shared/users/<user> in one place.
+# Regular/admin users keep the old narrow link: only their private workspace.
+if [ "$SHELL_USER" = 1 ]; then
+    _SHARED_LINK="$NFS_ROOT"
+else
+    _SHARED_LINK="$NFS_ROOT/users/$USERNAME"
+fi
+
+run "ln -sfn $_SHARED_LINK /home/$USERNAME/shared 2>/dev/null || true"
 # ln is not NOPASSWD on the GPU host. Temporarily chown the home dir to the
 # provisioning user (NOPASSWD), create the symlink without sudo, then restore.
 run "ssh $GPU_HOST_SSH \"sudo chown $GPU_HOST_USER /home/$USERNAME && \
-    ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared && \
+    ln -sfn $_SHARED_LINK /home/$USERNAME/shared && \
     sudo chown $NEW_UID:$NEW_UID /home/$USERNAME\""
 ok "workspace ready (owned $NEW_UID:$NEW_UID, 0700)"
 

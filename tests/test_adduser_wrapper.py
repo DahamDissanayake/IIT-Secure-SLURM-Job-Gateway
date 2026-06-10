@@ -43,17 +43,24 @@ def test_adduser_script_passes_bash_syntax():
 
 def test_adduser_creates_shared_symlink_on_both_nodes():
     """~/shared symlink must be created on BOTH login node and GPU host.
-    Without the GPU-host leg, shell users' home on the compute node has no ~/shared.
     ln is not NOPASSWD on the GPU host, so the script uses the chown trick:
     temporarily chown the home to the provisioning user, ln, then restore."""
     text = ADDUSER.read_text()
-    assert "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared" in text, \
+    assert "ln -sfn $_SHARED_LINK /home/$USERNAME/shared" in text, \
         "login-node symlink missing"
-    # GPU host: chown home → ln (no sudo) → chown back
     assert "chown $GPU_HOST_USER /home/$USERNAME" in text, \
         "GPU-host chown trick missing — needed to create symlink without sudo ln"
-    assert "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared" in text, \
-        "GPU-host symlink missing — shell users have no ~/shared on the compute node"
+
+
+def test_adduser_shell_user_gets_nfs_root_symlink():
+    """Shell users' ~/shared must point to NFS_ROOT so they can reach datasets,
+    models, envs AND their private ~/shared/users/<user> in one place.
+    Regular users keep the narrow link to their private workspace only."""
+    text = ADDUSER.read_text()
+    assert '_SHARED_LINK="$NFS_ROOT"' in text, \
+        "shell-user branch missing: ~/shared should point to NFS root"
+    assert '_SHARED_LINK="$NFS_ROOT/users/$USERNAME"' in text, \
+        "regular-user branch missing: ~/shared should point to private workspace"
 
 
 def test_adduser_enforces_home_ownership_both_nodes():
