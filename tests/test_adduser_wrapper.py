@@ -41,6 +41,21 @@ def test_adduser_script_passes_bash_syntax():
     assert r.returncode == 0, r.stderr
 
 
+def test_adduser_creates_shared_symlink_on_both_nodes():
+    """~/shared symlink must be created on BOTH login node and GPU host.
+    Without the GPU-host leg, shell users' home on the compute node has no ~/shared.
+    ln is not NOPASSWD on the GPU host, so the script uses the chown trick:
+    temporarily chown the home to the provisioning user, ln, then restore."""
+    text = ADDUSER.read_text()
+    assert "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared" in text, \
+        "login-node symlink missing"
+    # GPU host: chown home → ln (no sudo) → chown back
+    assert "chown $GPU_HOST_USER /home/$USERNAME" in text, \
+        "GPU-host chown trick missing — needed to create symlink without sudo ln"
+    assert "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared" in text, \
+        "GPU-host symlink missing — shell users have no ~/shared on the compute node"
+
+
 def test_adduser_enforces_home_ownership_both_nodes():
     """A stale home owned by a prior UID breaks `conda activate` (unreadable
     ~/.config/conda/.condarc). adduser must chown the home to the account UID

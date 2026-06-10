@@ -28,6 +28,7 @@ NFS_ROOT="${NFS_ROOT:-/shared}"
 SLURM_ACCOUNT="${SLURM_ACCOUNT:-default}"
 SLURM_QOS="${SLURM_QOS:-normal}"
 GPU_HOST_SSH="${GPU_HOST_SSH:-}"          # e.g. root-daham@192.168.122.1 (required)
+GPU_HOST_USER="${GPU_HOST_SSH%%@*}"       # the user on the GPU host (e.g. root-daham)
 UID_MIN="${UID_MIN:-2000}"
 UID_MAX="${UID_MAX:-60000}"
 
@@ -117,6 +118,11 @@ run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$NEW_UID $NFS_ROOT/users/$USERNAME && \
     sudo chmod 0700 $NFS_ROOT/users/$USERNAME\""
 run "ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared 2>/dev/null || true"
+# ln is not NOPASSWD on the GPU host. Temporarily chown the home dir to the
+# provisioning user (NOPASSWD), create the symlink without sudo, then restore.
+run "ssh $GPU_HOST_SSH \"sudo chown $GPU_HOST_USER /home/$USERNAME && \
+    ln -sfn $NFS_ROOT/users/$USERNAME /home/$USERNAME/shared && \
+    sudo chown $NEW_UID:$NEW_UID /home/$USERNAME\""
 ok "workspace ready (owned $NEW_UID:$NEW_UID, 0700)"
 
 # ── 6. Verify ──────────────────────────────────────────────────────────────────
