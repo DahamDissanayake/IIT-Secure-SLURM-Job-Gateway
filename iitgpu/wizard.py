@@ -629,7 +629,9 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
 
         elif data_choice.startswith("b)"):
             from iitgpu.upload import run_upload
-            run_upload()
+            _uploaded = run_upload()
+            if _uploaded:
+                data_path = _uploaded
 
         elif data_choice.startswith("c)"):
             # _download_from_url(folder_path) writes files into a folder and returns None.

@@ -506,3 +506,56 @@ class TestUnzip:
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
             sel.assert_not_called()
+
+
+class TestRunUploadReturnsPath:
+    """run_upload() must return the chosen folder_path so callers can use it."""
+
+    @staticmethod
+    def _cfg(tmp_path):
+        import dataclasses
+        from iitgpu.config import load_config
+        import os
+        os.environ["NFS_ROOT"] = str(tmp_path)
+        return load_config()
+
+    def test_returns_folder_path_on_back(self, tmp_path, monkeypatch):
+        """When user navigates in and then chooses Back, run_upload returns the folder."""
+        import getpass
+        from iitgpu import upload
+        from iitgpu.validate import user_upload_root
+
+        cfg = self._cfg(tmp_path)
+        user = getpass.getuser()
+        expected = str(tmp_path / "users" / user)
+
+        sel_responses = iter([
+            str(tmp_path / "users" / user),  # choose base upload folder
+            "back",                            # then Back
+        ])
+        monkeypatch.setattr(
+            "iitgpu.upload.questionary.select",
+            lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: next(sel_responses))})(),
+        )
+        monkeypatch.setattr("iitgpu.upload.questionary.text", lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: "")})())
+        monkeypatch.setattr("iitgpu.upload.auditclient.log", lambda *a, **kw: None)
+        monkeypatch.setattr("iitgpu.upload.ok", lambda *a, **kw: None)
+        monkeypatch.setattr("iitgpu.upload.err", lambda *a, **kw: None)
+
+        result = upload.run_upload()
+        assert result is not None
+        assert result == expected or result.startswith(str(tmp_path))
+
+    def test_returns_none_on_cancel(self, tmp_path, monkeypatch):
+        """Cancelling at folder-select must return None (no path was chosen)."""
+        from iitgpu import upload
+        self._cfg(tmp_path)
+
+        monkeypatch.setattr(
+            "iitgpu.upload.questionary.select",
+            lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: "__cancel__")})(),
+        )
+        monkeypatch.setattr("iitgpu.upload.auditclient.log", lambda *a, **kw: None)
+
+        result = upload.run_upload()
+        assert result is None

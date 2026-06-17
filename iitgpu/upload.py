@@ -268,7 +268,7 @@ def _download_from_url(folder_path: str) -> None:
     err("Download failed — check the URL and try again.")
 
 
-def run_upload() -> None:
+def run_upload() -> "str | None":
     import getpass
     from iitgpu.validate import in_user_upload_jail, user_upload_root
 
@@ -356,3 +356,4 @@ def run_upload() -> None:
             _download_from_url(folder_path)
         elif action == "browse":
             _browse_folder(folder_path)
+    return folder_path
