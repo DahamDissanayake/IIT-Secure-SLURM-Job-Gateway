@@ -87,6 +87,7 @@ def _build_status_line(jobs, username: str, spin: str) -> Panel:
 
     if jobs is None:
         job_seg = "[dim]fetching…[/]"
+        gpu_seg = ""
     else:
         running = [j for j in jobs if j.state == "RUNNING"]
         if running:
@@ -97,10 +98,15 @@ def _build_status_line(jobs, username: str, spin: str) -> Panel:
             if len(running) > 4:
                 parts.append(f"[dim]+{len(running) - 4} more[/]")
             job_seg = "  ".join(parts)
+            gpu_seg = "  [dim]·[/]  [yellow]GPU: Allocated[/]"
         else:
-            job_seg = "[bold green]GPU is available[/]"
+            job_seg = ""
+            gpu_seg = "[bold green]GPU is available[/]"
 
-    line = f"  {user_seg}  [dim]·[/]  {job_seg}"
+    if job_seg:
+        line = f"  {user_seg}  [dim]·[/]  {job_seg}{gpu_seg}"
+    else:
+        line = f"  {user_seg}  [dim]·[/]  {gpu_seg}"
     return Panel(
         line,
         title=f"[bold] {spin} Cluster Status  ·  any key to continue [/bold]",

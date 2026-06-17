@@ -454,7 +454,7 @@ def test_build_layout_footer_shows_pgupdn_hint():
 # ── Splash status block ───────────────────────────────────────────────────────
 
 def test_build_status_line_shows_running_job_with_user_and_time():
-    """Running job must appear with name, owner in brackets, and time used."""
+    """Running job must appear with name, owner in parens, time, and GPU: Allocated."""
     from iitgpu.slurm import QueueEntry
     from iitgpu.splash import _build_status_line
     from rich.console import Console
@@ -470,6 +470,7 @@ def test_build_status_line_shows_running_job_with_user_and_time():
     assert "train_run" in rendered
     assert "alice" in rendered
     assert "1:23:45" in rendered
+    assert "GPU: Allocated" in rendered
 
 
 def test_build_status_line_shows_all_users_running_jobs():
