@@ -81,67 +81,29 @@ def show_splash(pause: float = 1.5) -> None:
         time.sleep(pause)
 
 
-def _build_status_line(stats, jobs, username: str, spin: str) -> Panel:
-    """Single-line status panel: user · GPU/CPU/RAM % · active jobs."""
-    segments = []
+def _build_status_line(jobs, username: str, spin: str) -> Panel:
+    """Single-line status panel: user · all running jobs (any user) with time, or GPU available."""
+    user_seg = f"[bold cyan]User:[/] [bold white]{username}[/]"
 
-    # User
-    segments.append(f"[bold cyan]User:[/] [bold white]{username}[/]")
-
-    # Hardware
-    if stats is None:
-        segments.append("[dim]hardware unavailable[/]")
-    elif stats.live_stats:
-        gpu_c = "red" if stats.gpu_util >= 90 else "yellow" if stats.gpu_util >= 70 else "green"
-        cpu_c = "red" if stats.cpu_util >= 90 else "yellow" if stats.cpu_util >= 70 else "green"
-        mem_pct = int(stats.mem_used_mb / stats.mem_total_mb * 100) if stats.mem_total_mb else 0
-        mem_c = "red" if mem_pct >= 90 else "yellow" if mem_pct >= 70 else "green"
-        vram_gb = f"{stats.gpu_mem_used_mb/1024:.1f}/{stats.gpu_mem_total_mb/1024:.0f}GB"
-
-        segments.append(
-            f"[bold cyan]GPU:[/] [{gpu_c}]{stats.gpu_util}%[/]"
-            f" [dim]{vram_gb} VRAM  {stats.gpu_temp}°C  {stats.gpu_power_w:.0f}W[/]"
-        )
-        segments.append(
-            f"[bold cyan]CPU:[/] [{cpu_c}]{stats.cpu_util}%[/]"
-            f" [dim]load {stats.cpu_load:.2f}[/]"
-        )
-        segments.append(
-            f"[bold cyan]RAM:[/] [{mem_c}]{mem_pct}%[/]"
-            f" [dim]{stats.mem_used_mb/1024:.0f}/{stats.mem_total_mb/1024:.0f}GB[/]"
-        )
-    else:
-        gpu_c = "yellow" if stats.gpu_alloc > 0 else "green"
-        segments.append(
-            f"[bold cyan]GPU:[/] [{gpu_c}]{stats.gpu_alloc}/{stats.gpu_total} alloc[/]  "
-            f"[bold cyan]CPU:[/] {stats.cpu_alloc}/{stats.cpu_total}  "
-            f"[bold cyan]RAM:[/] {stats.mem_alloc_mb//1024}/{stats.mem_total_mb//1024}GB"
-        )
-
-    # Jobs — show current user's jobs with username
     if jobs is None:
-        segments.append("[dim]jobs: fetching…[/]")
+        job_seg = "[dim]fetching…[/]"
     else:
-        my_jobs = [j for j in jobs if j.user == username]
-        running = [j for j in my_jobs if j.state == "RUNNING"]
-        pending = [j for j in my_jobs if j.state == "PENDING"]
+        running = [j for j in jobs if j.state == "RUNNING"]
         if running:
-            job_parts = [f"{j.name} [{j.user}]" for j in running[:2]]
-            if len(running) > 2:
-                job_parts.append(f"+{len(running)-2} more")
-            segments.append(f"[bold cyan]Jobs:[/] [green]{', '.join(job_parts)} RUNNING[/]")
-        elif pending:
-            job_parts = [f"{j.name} [{j.user}]" for j in pending[:2]]
-            if len(pending) > 2:
-                job_parts.append(f"+{len(pending)-2} more")
-            segments.append(f"[bold cyan]Jobs:[/] [yellow]{', '.join(job_parts)} PENDING[/]")
+            parts = [
+                f"[green]{j.name}[/] [dim]({j.user})[/] [cyan]{j.time_used}[/]"
+                for j in running[:4]
+            ]
+            if len(running) > 4:
+                parts.append(f"[dim]+{len(running) - 4} more[/]")
+            job_seg = "  ".join(parts)
         else:
-            segments.append("[bold cyan]Jobs:[/] [dim]none[/]")
+            job_seg = "[bold green]GPU is available[/]"
 
-    line = "  " + "  ·  ".join(segments)
+    line = f"  {user_seg}  [dim]·[/]  {job_seg}"
     return Panel(
         line,
-        title=f"[bold] {spin} System Status  ·  any key to continue [/bold]",
+        title=f"[bold] {spin} Cluster Status  ·  any key to continue [/bold]",
         border_style="blue",
         expand=True,
         padding=(0, 0),
@@ -157,20 +119,14 @@ def show_status_block() -> None:
     except Exception:
         username = "?"
 
-    from iitgpu.slurm import get_node_stats, queue as _queue
+    from iitgpu.slurm import queue as _queue
 
-    stats = None
     jobs: list | None = None
     last_refresh = 0.0
 
     def _refresh() -> None:
-        nonlocal stats, jobs, last_refresh
+        nonlocal jobs, last_refresh
         try:
-            stats = get_node_stats()
-        except Exception:
-            stats = None
-        try:
-            # all_users=True so j.user is populated for the job filter
             jobs = _queue(all_users=True)
         except Exception:
             jobs = []
@@ -194,7 +150,7 @@ def show_status_block() -> None:
         with Live(console=console, auto_refresh=False, screen=False) as live:
             while time.monotonic() < deadline:
                 spin = _SPINNERS[int(time.monotonic() * 4) % len(_SPINNERS)]
-                live.update(_build_status_line(stats, jobs, username, spin))
+                live.update(_build_status_line(jobs, username, spin))
                 live.refresh()
 
                 if _HAS_TERMIOS:

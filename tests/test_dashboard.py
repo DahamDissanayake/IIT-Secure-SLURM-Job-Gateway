@@ -453,98 +453,88 @@ def test_build_layout_footer_shows_pgupdn_hint():
 
 # ── Splash status block ───────────────────────────────────────────────────────
 
-def test_build_status_line_with_live_stats():
-    """_build_status_line must show user, GPU%, CPU%, RAM%, and job name with username."""
-    from iitgpu.slurm import NodeStats, QueueEntry
+def test_build_status_line_shows_running_job_with_user_and_time():
+    """Running job must appear with name, owner in brackets, and time used."""
+    from iitgpu.slurm import QueueEntry
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
-    stats = NodeStats(
-        state="ALLOCATED", cpu_load=1.5, cpu_total=32, cpu_alloc=16,
-        mem_total_mb=131072, mem_alloc_mb=65536, gpu_total=1, gpu_alloc=1,
-        gpu_util=72, gpu_mem_used_mb=8192, gpu_mem_total_mb=32768,
-        gpu_temp=65, gpu_power_w=250.0, cpu_util=45, cpu_load5=1.2,
-        mem_used_mb=40000, live_stats=True,
-    )
-    jobs = [QueueEntry("10", "train_run", "RUNNING", "gpu", "1:00:00", 1, user="alice")]
-    panel = _build_status_line(stats, jobs, "alice", "⠋")
+    jobs = [QueueEntry("10", "train_run", "RUNNING", "gpu", "1:23:45", 1, user="alice")]
+    panel = _build_status_line(jobs, "bob", "⠋")
 
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
 
-    assert "alice" in rendered
     assert "train_run" in rendered
-    assert "72%" in rendered       # GPU %
-    assert "45%" in rendered       # CPU %
-    assert "GPU" in rendered
-    assert "CPU" in rendered
-    assert "RAM" in rendered
-
-
-def test_build_status_line_shows_job_username():
-    """Job entry must include the username in [brackets]."""
-    from iitgpu.slurm import QueueEntry
-    from iitgpu.splash import _build_status_line
-    from rich.console import Console
-
-    jobs = [QueueEntry("10", "my_train", "RUNNING", "gpu", "1:00:00", 1, user="alice")]
-    panel = _build_status_line(None, jobs, "alice", "⠋")
-
-    con = Console(force_terminal=True, width=200)
-    with con.capture() as cap:
-        con.print(panel)
-    rendered = cap.get()
-
-    assert "my_train" in rendered
     assert "alice" in rendered
+    assert "1:23:45" in rendered
 
 
-def test_build_status_line_no_stats():
-    """_build_status_line must not crash when stats are None."""
-    from iitgpu.splash import _build_status_line
-    from rich.console import Console
-
-    panel = _build_status_line(None, [], "bob", "⠙")
-    con = Console(force_terminal=True, width=200)
-    with con.capture() as cap:
-        con.print(panel)
-    rendered = cap.get()
-    assert "bob" in rendered
-
-
-def test_build_status_line_shows_pending_jobs():
-    """Pending jobs must appear with PENDING label."""
+def test_build_status_line_shows_all_users_running_jobs():
+    """Running jobs from ALL users must appear, not just the current user's."""
     from iitgpu.slurm import QueueEntry
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
-    jobs = [QueueEntry("11", "pending_job", "PENDING", "gpu", "0:00", 1, user="carol")]
-    panel = _build_status_line(None, jobs, "carol", "⠹")
-    con = Console(force_terminal=True, width=200)
-    with con.capture() as cap:
-        con.print(panel)
-    rendered = cap.get()
-    assert "PENDING" in rendered
-
-
-def test_build_status_line_filters_other_users_jobs():
-    """Jobs from other users must not appear in the status line for the current user."""
-    from iitgpu.slurm import QueueEntry
-    from iitgpu.splash import _build_status_line
-    from rich.console import Console
-
-    # alice and bob both have running jobs; panel is for alice
     jobs = [
-        QueueEntry("12", "alice_job", "RUNNING", "gpu", "1:00:00", 1, user="alice"),
-        QueueEntry("13", "bob_job",   "RUNNING", "gpu", "2:00:00", 1, user="bob"),
+        QueueEntry("11", "alice_job", "RUNNING", "gpu", "0:30:00", 1, user="alice"),
+        QueueEntry("12", "bob_job",   "RUNNING", "gpu", "1:00:00", 1, user="bob"),
     ]
-    panel = _build_status_line(None, jobs, "alice", "⠸")
+    panel = _build_status_line(jobs, "alice", "⠙")
+
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
 
     assert "alice_job" in rendered
-    assert "bob_job" not in rendered
+    assert "bob_job" in rendered
+
+
+def test_build_status_line_gpu_available_when_no_running_jobs():
+    """When no jobs are running, the panel must say GPU is available."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    # Only a pending job — no running jobs
+    jobs = [QueueEntry("13", "pending_job", "PENDING", "gpu", "0:00", 1, user="carol")]
+    panel = _build_status_line(jobs, "carol", "⠹")
+
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "GPU is available" in rendered
+    assert "pending_job" not in rendered
+
+
+def test_build_status_line_gpu_available_when_empty():
+    """Empty job list must show GPU is available."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    panel = _build_status_line([], "dave", "⠸")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "GPU is available" in rendered
+
+
+def test_build_status_line_shows_current_user():
+    """The logged-in username must always appear in the panel."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    panel = _build_status_line([], "myuser", "⠼")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "myuser" in rendered
