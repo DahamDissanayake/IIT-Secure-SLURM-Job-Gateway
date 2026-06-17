@@ -7,14 +7,6 @@ import os
 import re
 import shutil
 from datetime import datetime, timezone, timedelta
-
-
-def _cluster_tz():
-    try:
-        from iitgpu.config import cluster_tz
-        return cluster_tz()
-    except Exception:
-        return timezone(timedelta(hours=5, minutes=30))
 from pathlib import Path
 
 import questionary
@@ -26,6 +18,15 @@ from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, resource_defaul
 from iitgpu.slurm import submit_job
 from iitgpu.ui import err, header, info, kv, ok, panel, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
+
+
+def _cluster_tz():
+    try:
+        from iitgpu.config import cluster_tz
+        return cluster_tz()
+    except Exception:
+        return timezone(timedelta(hours=5, minutes=30))
+
 
 _STYLE = Style([
     ("qmark", "fg:cyan bold"),
@@ -104,7 +105,8 @@ def _valid_pkg_tokens(raw: str) -> list[str]:
     return [t for t in raw.split() if _PKG_RE.match(t)]
 
 
-def _notebook_deps_prompt(notebook_path: str, browse_jail, start_dir: str) -> tuple[str, str]:
+def _notebook_deps_prompt(notebook_path: str, browse_jail, start_dir: str,
+                          question: str = "Install Python dependencies first?") -> tuple[str, str]:
     """Ask how to install Python deps before a notebook runs / a session starts.
     When *notebook_path* is given, auto-detects a requirements.txt next to it or in
     its project root. Returns (requirements_path, packages_str) — at most one set."""
@@ -121,7 +123,7 @@ def _notebook_deps_prompt(notebook_path: str, browse_jail, start_dir: str) -> tu
         "Skip — my environment already has everything",
     ]
     sel = questionary.select(
-        "Install Python dependencies first?",
+        question,
         choices=choices, style=_STYLE,
     ).ask()
     if not sel or sel.startswith("Skip"):
@@ -484,6 +486,49 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         info("Interactive session ended.")
         return
 
+    # ── Step counter (auto-increments per shown step, so numbering stays
+    # correct regardless of which task-type-specific steps are skipped) ─────
+    _step_n = 1
+
+    def _S(label: str) -> str:
+        nonlocal _step_n
+        _step_n += 1
+        return f"Step {_step_n} \u2014 {label}"
+
+    # ── Early bypass: bring your own .sbatch ─────────────────────────────────
+    if questionary.confirm(
+        "Skip setup and submit your own ready-made .sbatch file?",
+        default=False, style=_STYLE,
+    ).ask():
+        _byp_folder = make_job_folder(jdir, JobSpec(
+            job_name=task_type, partition=cfg.partition,
+            gpus=defaults.gpus, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
+            time_limit=defaults.time_limit or "02:00:00", run_command="",
+            task_type=task_type,
+        ))
+        _byp_text = _tier3_own_script(user, cfg)
+        if _byp_text is None:
+            shutil.rmtree(_byp_folder, ignore_errors=True)
+            info("Discarded.")
+            return
+        _byp_sbatch = str(Path(_byp_folder) / "job.sbatch")
+        Path(_byp_sbatch).write_text(_byp_text)
+        Path(_byp_sbatch).chmod(0o644)
+        kv("Script saved", _byp_sbatch)
+        if not auditclient.log_or_block("job_submit", detail=task_type,
+                                        meta={"own_sbatch": True}):
+            err("Audit logging failed. Refusing to submit (safety policy).")
+            shutil.rmtree(_byp_folder, ignore_errors=True)
+            return
+        _byp_ok, _byp_res = submit_job(_byp_sbatch)
+        if _byp_ok:
+            ok(f"Job submitted! ID: {_byp_res}")
+            auditclient.log("job_submitted_ok", detail=task_type, job_id=_byp_res)
+        else:
+            err(f"Submission failed: {_byp_res}")
+            auditclient.log("job_submit_failed", detail=_byp_res)
+        return
+
     # ── Step 2: Environment ───────────────────────────────────────────────────
     from iitgpu.envs import list_all_envs
     from iitgpu.containers import list_images, validate_image
@@ -501,7 +546,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         _env_type_default = "Conda / venv environment"
 
     env_type = questionary.select(
-        "Step 2 — Environment type:"
+        _S("Environment type:")
         + (_prefill_hint if (_prefill_conda or _prefill_container) else ""),
         choices=[
             "Conda / venv environment",
@@ -607,7 +652,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         _data_default = "a) Pick an existing folder" if _prefill_dp else None
 
         data_choice = questionary.select(
-            "Step 3 — Your data:"
+            _S("Your data:")
             + (_prefill_hint if _prefill_dp else ""),
             choices=data_choices,
             default=_data_default,
@@ -640,8 +685,8 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             if in_jail(_dl_folder):
                 Path(_dl_folder).mkdir(parents=True, exist_ok=True)
                 from iitgpu.upload import _download_from_url
-                _download_from_url(_dl_folder)
-                data_path = _dl_folder
+                if _download_from_url(_dl_folder) is not None:
+                    data_path = _dl_folder
             else:
                 from iitgpu.upload import run_upload
                 run_upload()
@@ -664,7 +709,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             "d) Skip",
         ]
         model_choice = questionary.select(
-            "Step 4 — Your model:", choices=model_choices, style=_STYLE
+            _S("Your model:"), choices=model_choices, style=_STYLE
         ).ask()
         if model_choice is None:
             return
@@ -706,7 +751,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     # ── Step 5: Notebook config OR Script ─────────────────────────────────────
     if task_type == "notebook":
         dur_choice = questionary.select(
-            "Step 5 — How long do you need the GPU session?",
+            _S("How long do you need the GPU session?"),
             choices=["2 hours", "4 hours", "6 hours (Recommended)", "8 hours"],
             default="6 hours (Recommended)",
             style=_STYLE,
@@ -717,7 +762,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         nb_time_limit = f"{nb_hours:02d}:00:00"
 
         port_str = questionary.text(
-            "Step 6 — JupyterLab port (on the GPU node):", default="8888", style=_STYLE
+            _S("JupyterLab port (on the GPU node):"), default="8888", style=_STYLE
         ).ask()
         if port_str is None:
             return
@@ -729,7 +774,10 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         # Optionally pre-install deps so the interactive session starts ready
         # (no notebook selected here, so no auto-detect — choose a file or type).
         info("Tip: install your project's deps now so cells don't fail on import.")
-        nb_requirements, nb_packages = _notebook_deps_prompt("", _browse_jail, _user_browse_start())
+        nb_requirements, nb_packages = _notebook_deps_prompt(
+            "", _browse_jail, _user_browse_start(),
+            question="Optional — Pre-install packages for this session?",
+        )
 
         spec = JobSpec(
             job_name=job_name,
@@ -808,7 +856,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         if _prefill_sp and Path(_prefill_sp).exists() and _browse_jail(_prefill_sp):
             _start = str(Path(_prefill_sp).parent)
 
-        info("Step 5 — Select your job script (.py or .sh):")
+        info(_S("Select your script (.py or .sh):"))
         script_path = _browse_script(_start, _browse_jail)
         if script_path is None:
             return
@@ -844,7 +892,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     args = ""
     _prefill_args = _tdefaults.get("extra_args", "")
     raw_args = questionary.text(
-        "Step 6 — Extra arguments (blank = none):"
+        _S("Extra arguments (blank = none):")
         + (_prefill_hint if _prefill_args else ""),
         default=_prefill_args,
         style=_STYLE,
@@ -857,7 +905,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     array_spec = ""
     _prefill_array = _tdefaults.get("array", "")
     if questionary.confirm(
-        "Run as a job array (parameter sweep)?",
+        "Advanced (optional) — Job array / parameter sweep?",
         default=bool(_prefill_array), style=_STYLE,
     ).ask():
         raw = questionary.text(
@@ -876,7 +924,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     dependency = ""
     _prefill_dep = _tdefaults.get("dependency", "")
     if questionary.confirm(
-        "Wait for another job to finish first?",
+        "Advanced (optional) — Wait for another job first?",
         default=bool(_prefill_dep), style=_STYLE,
     ).ask():
         from iitgpu.slurm import queue as _q
@@ -1038,7 +1086,15 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         if spec.mail_user:
             info(f"SLURM will email [cyan]{spec.mail_user}[/] when the job ends.")
         if questionary.confirm(
-            "Wait here for the result?", default=False, style=_STYLE
+            "Watch live output now?", default=True, style=_STYLE
+        ).ask():
+            try:
+                from iitgpu.dashboard import run_dashboard
+                run_dashboard(job_id=result)
+            except ImportError:
+                info("Live dashboard not available. Check job output manually.")
+        elif questionary.confirm(
+            "Wait here for the result? (silent poll)", default=False, style=_STYLE
         ).ask():
             from iitgpu.notify import poll_until_done
             info("Waiting for the job to finish (Ctrl-C to stop waiting)…")
@@ -1047,14 +1103,6 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
                 ok(f"Job {result} finished: {final}")
             except KeyboardInterrupt:
                 info("Stopped waiting (job keeps running).")
-        if questionary.confirm(
-            "Watch live output now?", default=True, style=_STYLE
-        ).ask():
-            try:
-                from iitgpu.dashboard import run_dashboard
-                run_dashboard(job_id=result)
-            except ImportError:
-                info("Live dashboard not available. Check job output manually.")
     else:
         err(f"Submission failed: {result}")
         auditclient.log("job_submit_failed", detail=result)

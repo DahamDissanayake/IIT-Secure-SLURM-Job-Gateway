@@ -149,11 +149,7 @@ def _settings_menu() -> None:
             "Install prebuilt environment",
             "Run smoke test",
             "Advanced SLURM shell",
-            "Cluster status",
-            "Hardware stats (live)",
         ]
-        if _admin:
-            _choices.append("Admin panel")
         _choices.append("Back to main menu")
 
         choice = questionary.select(
@@ -179,14 +175,7 @@ def _settings_menu() -> None:
         elif choice == "Advanced SLURM shell":
             from iitgpu.shell import run_shell
             run_shell()
-        elif choice == "Cluster status":
-            _show_cluster_status()
-        elif choice == "Hardware stats (live)":
-            from iitgpu.dashboard import run_hardware_stats
-            run_hardware_stats()
-        elif choice == "Admin panel":
-            from iitgpu.admin import admin_menu
-            admin_menu()
+
 
 
 def _show_cluster_status() -> None:

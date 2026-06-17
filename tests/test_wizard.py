@@ -461,3 +461,70 @@ def test_notebook_deps_prompt_no_notebook_skips_autodetect(tmp_path, monkeypatch
     req, pkgs = wiz._notebook_deps_prompt("", lambda p: True, str(tmp_path))
     assert req == "" and pkgs == "tensorboard tqdm"
     assert not any("auto-detected" in c for c in seen["choices"])
+
+
+# ── Step counter and UX fixes ──────────────────────────────────────────────────
+
+def test_notebook_deps_custom_question(tmp_path, monkeypatch):
+    import iitgpu.wizard as wiz
+    seen = {}
+    def _cap_select(*a, **k):
+        seen["question"] = a[0] if a else ""
+        return MagicMock(ask=lambda: "Skip — my environment already has everything")
+    monkeypatch.setattr("questionary.select", _cap_select)
+    wiz._notebook_deps_prompt("", lambda p: True, str(tmp_path),
+                               question="Optional — Pre-install packages for this session?")
+    assert seen["question"] == "Optional — Pre-install packages for this session?"
+
+
+def test_notebook_deps_default_question(tmp_path, monkeypatch):
+    import iitgpu.wizard as wiz
+    seen = {}
+    def _cap_select(*a, **k):
+        seen["question"] = a[0] if a else ""
+        return MagicMock(ask=lambda: "Skip — my environment already has everything")
+    monkeypatch.setattr("questionary.select", _cap_select)
+    wiz._notebook_deps_prompt("", lambda p: True, str(tmp_path))
+    assert seen["question"] == "Install Python dependencies first?"
+
+
+def test_step_counter_increments_per_call():
+    _n = [1]
+    def _S(label):
+        _n[0] += 1
+        return f"Step {_n[0]} — {label}"
+    assert _S("Environment type:") == "Step 2 — Environment type:"
+    assert _S("Your data:")        == "Step 3 — Your data:"
+    assert _S("Your model:")       == "Step 4 — Your model:"
+
+
+def test_wizard_early_bypass_confirm_is_shown(monkeypatch):
+    import iitgpu.wizard as wiz
+    confirms_seen = []
+    def _cap_confirm(msg, **kw):
+        confirms_seen.append(msg)
+        return MagicMock(ask=lambda: False)
+    call_count = [0]
+    def _cap_select(*a, **kw):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return MagicMock(ask=lambda: list(wiz._TASK_LABELS.values())[1])
+        return MagicMock(ask=lambda: None)
+    monkeypatch.setattr("questionary.confirm", _cap_confirm)
+    monkeypatch.setattr("questionary.select", _cap_select)
+    monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
+    wiz.run_wizard()
+    bypass_prompts = [m for m in confirms_seen if "ready-made" in m or ".sbatch" in m]
+    assert bypass_prompts, f"Early bypass confirm not seen. Confirms: {confirms_seen}"
+
+
+def test_settings_menu_no_duplicates():
+    import iitgpu.menu as m
+    import inspect
+    src = inspect.getsource(m._settings_menu)
+    assert '"Cluster status"' not in src
+    assert '"Hardware stats (live)"' not in src
+    assert '"Admin panel"' not in src
+    assert "Cluster health check" in src
+    assert "Build environment" in src
+    assert "Run smoke test" in src

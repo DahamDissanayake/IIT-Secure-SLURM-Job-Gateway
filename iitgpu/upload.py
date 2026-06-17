@@ -227,7 +227,7 @@ def _browse_folder(folder_path: str) -> None:
     questionary.press_any_key_to_continue("").ask()
 
 
-def _download_from_url(folder_path: str) -> None:
+def _download_from_url(folder_path: str) -> "str | None":
     header("Download from URL")
     url = questionary.text(
         "URL to download  (https:// or http://):",
@@ -260,7 +260,7 @@ def _download_from_url(folder_path: str) -> None:
             if result.returncode == 0:
                 size = Path(target).stat().st_size if Path(target).exists() else 0
                 ok(f"Saved  {filename}  ({size:,} bytes)  →  {target}")
-                return
+                return target
             Path(target).unlink(missing_ok=True)
         except FileNotFoundError:
             continue
