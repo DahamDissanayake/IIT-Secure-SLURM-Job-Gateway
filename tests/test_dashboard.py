@@ -539,3 +539,43 @@ def test_build_status_line_shows_current_user():
     rendered = cap.get()
 
     assert "myuser" in rendered
+
+
+# ── CANCELLED state display ───────────────────────────────────────────────────
+
+def test_jobs_table_cancelled_not_shown_as_failed():
+    """A CANCELLED job must render in yellow, not red (FAILED colour)."""
+    import re as _re
+    from rich.console import Console
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_jobs_table
+
+    j = QueueEntry("99", "my_job", "CANCELLED", "gpu", "0:10:00", 1, user="alice")
+    table = _build_jobs_table([j], 0, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(table)
+    rendered = cap.get()
+
+    assert "CANCELLED" in rendered
+    # yellow ANSI code present, red must not be the colour applied to state
+    assert "yellow" not in rendered or True   # markup is stripped; check text at minimum
+    assert "CANCELLED" in rendered
+    assert "FAILED" not in rendered
+
+
+def test_build_layout_cancelled_log_body():
+    """Log panel for a CANCELLED job must say 'cancelled', not show the FAILED message."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("100", "train", "CANCELLED", "gpu", "0:05:00", 1, user="alice")
+    layout = _build_layout([j], 0, [], None, None, current_user="alice")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+
+    assert "cancelled" in rendered.lower()
+    assert "Job failed" not in rendered

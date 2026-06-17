@@ -184,7 +184,7 @@ def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: s
         prefix = "[bold cyan]❯[/]" if is_selected else " "
 
         if is_done:
-            s_color = "cyan" if j.state == "COMPLETED" else "red"
+            s_color = "cyan" if j.state == "COMPLETED" else ("yellow" if j.state == "CANCELLED" else "red")
             elapsed_secs = _slurm_time_to_secs(j.time_used) or 0
             elapsed_str = _fmt_duration(elapsed_secs) if elapsed_secs > 0 else j.time_used
             table.add_row(
@@ -301,6 +301,8 @@ def _build_layout(
             )
         else:
             log_body = "\n".join(visible)
+    elif selected_job.state == "CANCELLED":
+        log_body = "[yellow]Job was cancelled.[/]"
     elif selected_job.state == "FAILED":
         log_body = "[red]Job failed — output not yet visible. Press R to refresh.[/]"
     elif selected_job.state == "COMPLETED":

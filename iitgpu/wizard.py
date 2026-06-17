@@ -15,7 +15,7 @@ from questionary import Style
 from iitgpu import auditclient
 from iitgpu.config import load_config, jobs_dir, user_dir
 from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, resource_defaults
-from iitgpu.slurm import submit_job
+from iitgpu.slurm import submit_job, get_node_stats
 from iitgpu.ui import err, header, info, kv, ok, panel, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
 
@@ -396,6 +396,80 @@ def _tier3_own_script(username: str, cfg) -> str | None:
             continue
         auditclient.log("sbatch_own_script", meta={"path": sbatch_path})
         return text
+
+
+_VRAM_TASK_DEFAULTS: dict[str, int] = {
+    "test":        4,
+    "inference":   8,
+    "notebook":    8,
+    "train":       0,
+    "finetune":    0,
+    "custom":      0,
+}
+
+
+def _vram_check(task_type: str) -> bool:
+    """Prompt for estimated VRAM, check against live free VRAM, block/warn if tight.
+
+    Returns True  → proceed with submission.
+    Returns False → user chose to cancel.
+    """
+    from iitgpu.ui import console as _con
+
+    # Always show current VRAM state as context.
+    try:
+        stats = get_node_stats()
+    except Exception:
+        stats = None
+
+    if stats and stats.live_stats:
+        total_gb = stats.gpu_mem_total_mb / 1024
+        used_gb  = stats.gpu_mem_used_mb  / 1024
+        free_gb  = total_gb - used_gb
+        info(
+            f"GPU VRAM: [green]{free_gb:.1f} GB free[/]  [dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]"
+        )
+    else:
+        free_gb = None
+        warn("Live GPU stats unavailable — VRAM check will be skipped.")
+
+    default_vram = _VRAM_TASK_DEFAULTS.get(task_type, 0)
+    raw = questionary.text(
+        "Estimated VRAM your job needs (GB, 0 = skip check):",
+        default=str(default_vram),
+        style=_STYLE,
+    ).ask()
+    if raw is None:
+        return False
+    try:
+        needed_gb = max(0.0, float(raw.strip()))
+    except ValueError:
+        needed_gb = 0.0
+
+    if needed_gb <= 0 or free_gb is None:
+        return True
+
+    if needed_gb > free_gb:
+        from rich.panel import Panel
+        shortfall = needed_gb - free_gb
+        body = (
+            f"\n"
+            f"  [bold]Available VRAM:[/]  [red]{free_gb:.1f} GB[/]"
+            f"  [dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]\n"
+            f"  [bold]Requested     :[/]  [yellow]{needed_gb:.0f} GB[/]\n"
+            f"  [bold]Shortfall     :[/]  [red]{shortfall:.1f} GB[/]\n\n"
+            f"  [dim]Wait for a running job to finish, or reduce batch size / precision.[/]\n"
+        )
+        _con.print(Panel(body, title="[bold red] GPU VRAM conflict — job will likely OOM [/]",
+                         border_style="red"))
+        override = questionary.confirm(
+            "Submit anyway? (the job will probably crash with CUDA OOM)",
+            default=False, style=_STYLE,
+        ).ask()
+        return bool(override)
+
+    ok(f"VRAM OK — {needed_gb:.0f} GB requested, {free_gb:.1f} GB free.")
+    return True
 
 
 def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity ok for a wizard)
@@ -809,6 +883,11 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         )
         panel("Generated notebook sbatch script", script_text)
 
+        if not _vram_check(task_type):
+            shutil.rmtree(folder, ignore_errors=True)
+            info("Submission cancelled.")
+            return
+
         action = questionary.select(
             "What would you like to do?",
             choices=["Submit notebook job", "Discard"],
@@ -1005,6 +1084,12 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     )
     panel("Job Summary", summary_lines)
     panel("Generated sbatch script", script_text)
+
+    # ── VRAM check ────────────────────────────────────────────────────────────
+    if not _vram_check(task_type):
+        shutil.rmtree(folder, ignore_errors=True)
+        info("Submission cancelled.")
+        return
 
     # ── Action ────────────────────────────────────────────────────────────────
     action = questionary.select(

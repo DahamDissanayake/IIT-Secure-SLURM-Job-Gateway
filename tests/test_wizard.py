@@ -528,3 +528,123 @@ def test_settings_menu_no_duplicates():
     assert "Cluster health check" in src
     assert "Build environment" in src
     assert "Run smoke test" in src
+
+
+# ── VRAM guardrail ────────────────────────────────────────────────────────────
+
+def _make_stats(gpu_mem_used_mb: int = 12288, gpu_mem_total_mb: int = 32768):
+    from iitgpu.slurm import NodeStats
+    return NodeStats(
+        state="ALLOCATED", cpu_load=1.0, cpu_total=32, cpu_alloc=16,
+        mem_total_mb=131072, mem_alloc_mb=65536, gpu_total=1, gpu_alloc=1,
+        gpu_util=50, gpu_mem_used_mb=gpu_mem_used_mb,
+        gpu_mem_total_mb=gpu_mem_total_mb,
+        gpu_temp=60, gpu_power_w=200.0, cpu_util=40, cpu_load5=1.0,
+        mem_used_mb=40000, live_stats=True,
+    )
+
+
+def test_vram_check_passes_when_enough_free(monkeypatch):
+    """_vram_check returns True when requested VRAM fits in free headroom."""
+    from unittest.mock import patch
+    import iitgpu.wizard as wiz
+
+    # 12 GB in use, 32 GB total → 20 GB free; request 10 GB → should pass
+    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
+    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+         patch("questionary.text") as mock_text:
+        mock_text.return_value.ask.return_value = "10"
+        result = wiz._vram_check("train")
+
+    assert result is True
+
+
+def test_vram_check_blocks_when_insufficient_vram(monkeypatch):
+    """_vram_check returns False (cancel) when requested VRAM exceeds free headroom
+    and the user declines the override prompt."""
+    from unittest.mock import patch
+    import iitgpu.wizard as wiz
+
+    # 12 GB in use, 32 GB total → 20 GB free; request 28 GB → shortfall 8 GB
+    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
+    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+         patch("questionary.text") as mock_text, \
+         patch("questionary.confirm") as mock_confirm:
+        mock_text.return_value.ask.return_value = "28"
+        mock_confirm.return_value.ask.return_value = False   # user says don't override
+        result = wiz._vram_check("train")
+
+    assert result is False
+
+
+def test_vram_check_allows_override_when_user_confirms(monkeypatch):
+    """_vram_check returns True when VRAM is insufficient but user forces override."""
+    from unittest.mock import patch
+    import iitgpu.wizard as wiz
+
+    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
+    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+         patch("questionary.text") as mock_text, \
+         patch("questionary.confirm") as mock_confirm:
+        mock_text.return_value.ask.return_value = "28"
+        mock_confirm.return_value.ask.return_value = True   # user overrides
+        result = wiz._vram_check("train")
+
+    assert result is True
+
+
+def test_vram_check_skip_when_zero(monkeypatch):
+    """_vram_check returns True immediately when the user enters 0 (skip)."""
+    from unittest.mock import patch
+    import iitgpu.wizard as wiz
+
+    stats = _make_stats(gpu_mem_used_mb=30000, gpu_mem_total_mb=32768)
+    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+         patch("questionary.text") as mock_text:
+        mock_text.return_value.ask.return_value = "0"
+        result = wiz._vram_check("train")
+
+    assert result is True
+
+
+def test_vram_check_skips_when_stats_unavailable(monkeypatch):
+    """_vram_check returns True (proceed) when GPU stats cannot be read."""
+    from unittest.mock import patch
+    import iitgpu.wizard as wiz
+
+    with patch("iitgpu.wizard.get_node_stats", return_value=None), \
+         patch("questionary.text") as mock_text:
+        mock_text.return_value.ask.return_value = "20"
+        result = wiz._vram_check("train")
+
+    assert result is True
+
+
+def test_vram_check_uses_task_default_for_inference(monkeypatch):
+    """_vram_check seeds the prompt default from _VRAM_TASK_DEFAULTS."""
+    from unittest.mock import patch, call
+    import iitgpu.wizard as wiz
+
+    stats = _make_stats(gpu_mem_used_mb=0, gpu_mem_total_mb=32768)
+    captured_default = []
+
+    def fake_text(prompt, default="", **kw):
+        captured_default.append(default)
+        m = type("M", (), {"ask": lambda self: default})()
+        return m
+
+    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+         patch("questionary.text", side_effect=fake_text):
+        wiz._vram_check("inference")
+
+    assert captured_default and captured_default[0] == "8"
+
+
+def test_vram_check_present_in_wizard_source():
+    """_vram_check must be called in run_wizard for both submission paths."""
+    import inspect
+    from iitgpu import wizard
+    src = inspect.getsource(wizard.run_wizard)
+    assert src.count("_vram_check") >= 2, (
+        f"Expected _vram_check called at least twice in run_wizard, found {src.count('_vram_check')}"
+    )
