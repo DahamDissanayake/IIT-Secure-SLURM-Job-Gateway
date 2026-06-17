@@ -579,3 +579,89 @@ def test_build_layout_cancelled_log_body():
 
     assert "cancelled" in rendered.lower()
     assert "Job failed" not in rendered
+
+
+# ── Admin cancel rights ───────────────────────────────────────────────────────
+
+def test_build_layout_admin_can_cancel_other_users_job():
+    """Admin must see C=cancel for a job that belongs to a different user."""
+    import re as _re
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("200", "other_train", "RUNNING", "gpu", "0:30:00", 1, user="bob")
+    layout = _build_layout([j], 0, [], None, None,
+                           current_user="admin", is_admin=True)
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "C=cancel" in plain
+
+
+def test_build_layout_non_admin_cannot_cancel_other_users_job():
+    """Regular user must NOT see C=cancel for another user's job."""
+    import re as _re
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("201", "other_train", "RUNNING", "gpu", "0:30:00", 1, user="bob")
+    layout = _build_layout([j], 0, [], None, None,
+                           current_user="alice", is_admin=False)
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "C=cancel" not in plain
+
+
+def test_build_layout_admin_sees_other_users_log():
+    """Admin must see job output even when the job belongs to a different user."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("202", "secret_job", "RUNNING", "gpu", "0:10:00", 1, user="bob")
+    layout = _build_layout([j], 0, ["epoch 1/10 loss=0.9"], "/tmp/slurm-202.out",
+                           None, current_user="admin", is_admin=True)
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "epoch 1/10" in rendered
+
+
+def test_build_layout_non_admin_cannot_see_other_users_log():
+    """Non-admin must NOT see another user's job output (regression guard)."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("203", "private_job", "RUNNING", "gpu", "0:10:00", 1, user="bob")
+    layout = _build_layout([j], 0, ["secret output line"], "/tmp/slurm-203.out",
+                           None, current_user="alice", is_admin=False)
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    assert "secret output line" not in rendered
+
+
+def test_build_layout_admin_tag_visible_in_footer():
+    """Footer must contain '[admin]' tag when is_admin=True."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+
+    j = QueueEntry("204", "some_job", "RUNNING", "gpu", "0:05:00", 1, user="bob")
+    layout = _build_layout([j], 0, [], None, None,
+                           current_user="admin", is_admin=True)
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    rendered = cap.get()
+    import re
+    plain = re.sub(r'\x1b\[[0-9;]*m', '', rendered)
+    assert "(admin)" in plain

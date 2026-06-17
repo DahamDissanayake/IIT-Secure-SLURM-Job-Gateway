@@ -255,6 +255,7 @@ def _build_layout(
     current_user: str = "",
     is_jupyter: bool = False,
     log_scroll: int = 0,
+    is_admin: bool = False,
 ) -> Layout:
     layout = Layout()
     jobs_height = min(len(jobs) + 6, 16)
@@ -281,10 +282,11 @@ def _build_layout(
 
     selected_job = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
     is_own_job = selected_job is not None and selected_job.user == current_user
+    can_view_log = is_own_job or is_admin
     log_title = f"Output: {log_path}" if log_path else "Output"
     if not selected_job:
         log_body = "[dim]No job selected.[/]"
-    elif not is_own_job:
+    elif not can_view_log:
         log_body = f"[dim]{selected_job.user}'s job — output not shown.[/dim]"
     elif log_lines:
         panel_h = max(3, console.height - jobs_height - 6)
@@ -311,14 +313,16 @@ def _build_layout(
         log_body = "[dim]Waiting for job to start...[/]"
 
     layout["log"].update(Panel(log_body, title=log_title, border_style="cyan"))
-    can_cancel = is_own_job and selected_job and selected_job.state not in ("COMPLETED", "FAILED", "CANCELLED")
+    _active = selected_job and selected_job.state not in ("COMPLETED", "FAILED", "CANCELLED")
+    can_cancel = bool(_active and (is_own_job or is_admin))
     can_extend = (is_own_job and is_jupyter
                   and selected_job and selected_job.state == "RUNNING")
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
+    admin_tag   = "  [dim](admin)[/dim]" if is_admin else ""
     layout["footer"].update(
         f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh"
-        f"   ↑↓=scroll  PgUp/PgDn=jump[/dim]"
+        f"   ↑↓=scroll  PgUp/PgDn=jump{admin_tag}[/dim]"
     )
     return layout
 
@@ -492,6 +496,8 @@ def run_dashboard(job_id: str | None = None) -> None:
     cfg = load_config()
     jdir = jobs_dir(cfg)
     current_user = _effective_user()
+    from iitgpu.config import is_admin as _is_admin_fn
+    _admin = _is_admin_fn(cfg)
 
     jobs: list[QueueEntry] = _merged_jobs(jdir)
     selected_idx = 0
@@ -519,7 +525,7 @@ def run_dashboard(job_id: str | None = None) -> None:
             selected_idx = len(jobs) - 1
         sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
         is_own = sel and sel.user == current_user
-        lookup_id = sel.job_id if is_own else None
+        lookup_id = sel.job_id if (is_own or _admin) else None
         if lookup_id is None and pinned_job_id:
             lookup_id = pinned_job_id
         if lookup_id:
@@ -575,6 +581,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                     current_user,
                     _is_jupyter[0],
                     _log_scroll[0],
+                    _admin,
                 ))
 
                 key = _wait_key(1.0 / _DISPLAY_FPS)
@@ -595,7 +602,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                     _refresh_data()
                 elif key == "c":
                     sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
-                    if sel and sel.user != current_user:
+                    if sel and sel.user != current_user and not _admin:
                         live.stop()
                         err(f"Job {sel.job_id} belongs to {sel.user} — you can only cancel your own jobs.")
                         import time as _t; _t.sleep(1.5)
@@ -605,15 +612,17 @@ def run_dashboard(job_id: str | None = None) -> None:
                         import questionary
                         from questionary import Style
                         _s = Style([("question", "bold"), ("answer", "fg:magenta bold")])
+                        _owner_note = f" [{sel.user}]" if sel.user != current_user else ""
                         if questionary.confirm(
-                            f"Cancel job {sel.job_id} ({sel.name})?",
+                            f"Cancel job {sel.job_id} ({sel.name}){_owner_note}?",
                             default=False, style=_s,
                         ).ask():
                             success, msg = cancel(sel.job_id)
                             (ok if success else err)(msg)
                             if success:
                                 from iitgpu import auditclient as _audit
-                                _audit.log("job_cancel", detail="dashboard", job_id=sel.job_id)
+                                _detail = "dashboard_admin" if sel.user != current_user else "dashboard"
+                                _audit.log("job_cancel", detail=_detail, job_id=sel.job_id)
                         live.start()
                 elif key == "e":
                     sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
