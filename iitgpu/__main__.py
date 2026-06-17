@@ -149,8 +149,9 @@ def main() -> None:
 
     try:
         if not args.no_splash:
-            from iitgpu.splash import show_splash
+            from iitgpu.splash import show_splash, show_status_block
             show_splash()
+            show_status_block()
         from iitgpu.menu import run_menu
         run_menu()
     except Exception as exc:

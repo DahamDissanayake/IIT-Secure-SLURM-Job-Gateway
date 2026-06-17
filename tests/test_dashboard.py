@@ -310,3 +310,200 @@ def test_build_layout_extend_hint_hidden_for_non_jupyter():
         con.print(layout)
     rendered = cap.get()
     assert "E=+2h" not in rendered
+
+
+# ── _wait_key regression and new key codes ────────────────────────────────────
+
+def _make_wait_key_env(chars: list[str]):
+    """Return (mock_select, mock_sys) patches that feed chars one read() at a time."""
+    from unittest.mock import MagicMock, patch
+    import iitgpu.dashboard as dash
+
+    read_iter = iter(chars)
+    fake_stdin = MagicMock()
+    fake_stdin.read.side_effect = lambda n: next(read_iter, '')
+
+    ready = [fake_stdin]
+
+    def fake_select(rlist, wlist, xlist, timeout):
+        return (ready if ready else [], [], [])
+
+    return fake_stdin, fake_select
+
+
+def test_wait_key_returns_regular_char_not_none():
+    """Regression: _wait_key must return the pressed character for non-escape keys.
+
+    The bug: 'return ch.lower()' was indented inside 'if ch == ESC:' so pressing
+    q/s/c fell through to 'return None', making keyboard shortcuts unresponsive.
+    """
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    fake_stdin, fake_select = _make_wait_key_env(['q'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 'q', f"Expected 'q', got {result!r} — indentation bug not fixed"
+
+
+def test_wait_key_returns_s_key():
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    fake_stdin, fake_select = _make_wait_key_env(['s'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 's'
+
+
+def test_wait_key_returns_up_arrow():
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    # ESC [ A
+    fake_stdin, fake_select = _make_wait_key_env(['\x1b', '[', 'A'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 'up'
+
+
+def test_wait_key_returns_down_arrow():
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    fake_stdin, fake_select = _make_wait_key_env(['\x1b', '[', 'B'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 'down'
+
+
+def test_wait_key_returns_pgup():
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    # ESC [ 5 ~
+    fake_stdin, fake_select = _make_wait_key_env(['\x1b', '[', '5', '~'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 'pgup'
+
+
+def test_wait_key_returns_pgdn():
+    from unittest.mock import patch
+    import iitgpu.dashboard as dash
+
+    # ESC [ 6 ~
+    fake_stdin, fake_select = _make_wait_key_env(['\x1b', '[', '6', '~'])
+
+    with patch.object(dash, '_HAS_TERMIOS', True), \
+         patch('iitgpu.dashboard.select') as mock_sel, \
+         patch('iitgpu.dashboard.sys') as mock_sys:
+        mock_sel.select.side_effect = fake_select
+        mock_sys.stdin = fake_stdin
+        result = dash._wait_key(0.0)
+
+    assert result == 'pgdn'
+
+
+def test_build_layout_footer_shows_pgupdn_hint():
+    """Footer must mention PgUp/PgDn scroll hints."""
+    import re as _re
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.dashboard import _build_layout
+    from rich.console import Console
+    j = QueueEntry("9", "train", "RUNNING", "gpu", "0:05:00", 1,
+                   user="alice", time_limit="4:00:00")
+    layout = _build_layout([j], 0, [], None, None, current_user="alice")
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(layout)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "PgUp" in plain or "PgDn" in plain, "PgUp/PgDn hint missing from footer"
+
+
+# ── Splash status block ───────────────────────────────────────────────────────
+
+def test_build_status_renderable_with_live_stats():
+    """_build_status_renderable must build without error when live stats are available."""
+    from iitgpu.slurm import NodeStats, QueueEntry
+    from iitgpu.splash import _build_status_renderable
+    from rich.console import Console
+
+    stats = NodeStats(
+        state="ALLOCATED", cpu_load=1.5, cpu_total=32, cpu_alloc=16,
+        mem_total_mb=131072, mem_alloc_mb=65536, gpu_total=1, gpu_alloc=1,
+        gpu_util=72, gpu_mem_used_mb=8192, gpu_mem_total_mb=32768,
+        gpu_temp=65, gpu_power_w=250.0, cpu_util=45, cpu_load5=1.2,
+        mem_used_mb=40000, live_stats=True,
+    )
+    jobs = [QueueEntry("10", "train_run", "RUNNING", "gpu", "1:00:00", 1, user="alice")]
+    panel = _build_status_renderable(stats, jobs, "alice", "⠋")
+
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "alice" in rendered
+    assert "train_run" in rendered
+    assert "GPU" in rendered
+    assert "CPU" in rendered
+    assert "RAM" in rendered
+
+
+def test_build_status_renderable_no_stats():
+    """_build_status_renderable must not crash when stats are None."""
+    from iitgpu.splash import _build_status_renderable
+    from rich.console import Console
+
+    panel = _build_status_renderable(None, [], "bob", "⠙")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+    assert "bob" in rendered
+
+
+def test_build_status_renderable_shows_pending_jobs():
+    """Pending jobs must appear in the status panel."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.splash import _build_status_renderable
+    from rich.console import Console
+
+    jobs = [QueueEntry("11", "pending_job", "PENDING", "gpu", "0:00", 1, user="carol")]
+    panel = _build_status_renderable(None, jobs, "carol", "⠹")
+    con = Console(force_terminal=True, width=120)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+    assert "pending" in rendered.lower()

@@ -293,7 +293,12 @@ def _build_layout(
         start = max(0, total - panel_h - scroll)
         visible = log_lines[start:start + panel_h]
         if start > 0:
-            log_body = f"[dim]↑ {start} lines above  (↑↓ arrows to scroll)[/dim]\n" + "\n".join(visible)
+            end_line = start + len(visible)
+            log_body = (
+                f"[dim]↑ {start} lines above  ·  {start+1}–{end_line}/{total}"
+                f"  ·  ↑↓=line  PgUp/PgDn=jump[/dim]\n"
+                + "\n".join(visible)
+            )
         else:
             log_body = "\n".join(visible)
     elif selected_job.state == "FAILED":
@@ -310,7 +315,8 @@ def _build_layout(
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
     layout["footer"].update(
-        f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh   ↑↓=scroll output[/dim]"
+        f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh"
+        f"   ↑↓=scroll  PgUp/PgDn=jump[/dim]"
     )
     return layout
 
@@ -455,7 +461,14 @@ def _wait_key(timeout: float) -> str | None:
                                 return 'up'
                             if ch3 == 'B':
                                 return 'down'
-                return ch.lower()
+                            # Page Up = ESC[5~  Page Down = ESC[6~
+                            if ch3 in ('5', '6'):
+                                r4, _, _ = select.select([sys.stdin], [], [], 0.05)
+                                if r4:
+                                    sys.stdin.read(1)  # consume trailing '~'
+                                return 'pgup' if ch3 == '5' else 'pgdn'
+                return None  # swallow unrecognised escape sequences
+            return ch.lower()
     except (OSError, ValueError):
         pass
     return None
@@ -567,9 +580,13 @@ def run_dashboard(job_id: str | None = None) -> None:
                 if key == "q":
                     break
                 elif key == "up":
-                    _log_scroll[0] += 3
+                    _log_scroll[0] += 1
                 elif key == "down":
-                    _log_scroll[0] = max(0, _log_scroll[0] - 3)
+                    _log_scroll[0] = max(0, _log_scroll[0] - 1)
+                elif key == "pgup":
+                    _log_scroll[0] += 10
+                elif key == "pgdn":
+                    _log_scroll[0] = max(0, _log_scroll[0] - 10)
                 elif key == "s" and jobs:
                     selected_idx = (selected_idx + 1) % len(jobs)
                     _log_scroll[0] = 0
