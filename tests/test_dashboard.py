@@ -453,10 +453,10 @@ def test_build_layout_footer_shows_pgupdn_hint():
 
 # ── Splash status block ───────────────────────────────────────────────────────
 
-def test_build_status_renderable_with_live_stats():
-    """_build_status_renderable must build without error when live stats are available."""
+def test_build_status_line_with_live_stats():
+    """_build_status_line must show user, GPU%, CPU%, RAM%, and job name with username."""
     from iitgpu.slurm import NodeStats, QueueEntry
-    from iitgpu.splash import _build_status_renderable
+    from iitgpu.splash import _build_status_line
     from rich.console import Console
 
     stats = NodeStats(
@@ -467,43 +467,84 @@ def test_build_status_renderable_with_live_stats():
         mem_used_mb=40000, live_stats=True,
     )
     jobs = [QueueEntry("10", "train_run", "RUNNING", "gpu", "1:00:00", 1, user="alice")]
-    panel = _build_status_renderable(stats, jobs, "alice", "⠋")
+    panel = _build_status_line(stats, jobs, "alice", "⠋")
 
-    con = Console(force_terminal=True, width=120)
+    con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
 
     assert "alice" in rendered
     assert "train_run" in rendered
+    assert "72%" in rendered       # GPU %
+    assert "45%" in rendered       # CPU %
     assert "GPU" in rendered
     assert "CPU" in rendered
     assert "RAM" in rendered
 
 
-def test_build_status_renderable_no_stats():
-    """_build_status_renderable must not crash when stats are None."""
-    from iitgpu.splash import _build_status_renderable
+def test_build_status_line_shows_job_username():
+    """Job entry must include the username in [brackets]."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.splash import _build_status_line
     from rich.console import Console
 
-    panel = _build_status_renderable(None, [], "bob", "⠙")
-    con = Console(force_terminal=True, width=120)
+    jobs = [QueueEntry("10", "my_train", "RUNNING", "gpu", "1:00:00", 1, user="alice")]
+    panel = _build_status_line(None, jobs, "alice", "⠋")
+
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "my_train" in rendered
+    assert "alice" in rendered
+
+
+def test_build_status_line_no_stats():
+    """_build_status_line must not crash when stats are None."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    panel = _build_status_line(None, [], "bob", "⠙")
+    con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
     assert "bob" in rendered
 
 
-def test_build_status_renderable_shows_pending_jobs():
-    """Pending jobs must appear in the status panel."""
+def test_build_status_line_shows_pending_jobs():
+    """Pending jobs must appear with PENDING label."""
     from iitgpu.slurm import QueueEntry
-    from iitgpu.splash import _build_status_renderable
+    from iitgpu.splash import _build_status_line
     from rich.console import Console
 
     jobs = [QueueEntry("11", "pending_job", "PENDING", "gpu", "0:00", 1, user="carol")]
-    panel = _build_status_renderable(None, jobs, "carol", "⠹")
-    con = Console(force_terminal=True, width=120)
+    panel = _build_status_line(None, jobs, "carol", "⠹")
+    con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
-    assert "pending" in rendered.lower()
+    assert "PENDING" in rendered
+
+
+def test_build_status_line_filters_other_users_jobs():
+    """Jobs from other users must not appear in the status line for the current user."""
+    from iitgpu.slurm import QueueEntry
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    # alice and bob both have running jobs; panel is for alice
+    jobs = [
+        QueueEntry("12", "alice_job", "RUNNING", "gpu", "1:00:00", 1, user="alice"),
+        QueueEntry("13", "bob_job",   "RUNNING", "gpu", "2:00:00", 1, user="bob"),
+    ]
+    panel = _build_status_line(None, jobs, "alice", "⠸")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "alice_job" in rendered
+    assert "bob_job" not in rendered
