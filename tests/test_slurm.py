@@ -113,13 +113,15 @@ def test_job_history_falls_back_to_file_scan_when_sacct_disabled(tmp_path, monke
     monkeypatch.setenv("SACCT_ENABLED", "0")
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
 
-    # Create a fake job output file
-    job_dir = tmp_path / "jobs" / "daham" / "train_20260530_120000"
+    # Create a fake job output file. job_history is always called with
+    # jobs_dir() (NFS_ROOT/jobs), not NFS_ROOT itself — match that contract.
+    jobs_root = tmp_path / "jobs"
+    job_dir = jobs_root / "daham" / "train_20260530_120000"
     job_dir.mkdir(parents=True)
     (job_dir / "slurm-500.out").write_text("output\n")
 
     from iitgpu.slurm import job_history
-    rows = job_history(str(tmp_path))
+    rows = job_history(str(jobs_root))
     assert any(r.job_id == "500" for r in rows)
 
 
@@ -132,13 +134,14 @@ def test_job_history_falls_back_when_sacct_returns_empty(tmp_path, monkeypatch):
     mock.returncode = 0
     mock.stdout = ""
 
-    job_dir = tmp_path / "jobs" / "daham" / "train_20260530_130000"
+    jobs_root = tmp_path / "jobs"
+    job_dir = jobs_root / "daham" / "train_20260530_130000"
     job_dir.mkdir(parents=True)
     (job_dir / "slurm-600.out").write_text("output\n")
 
     with patch("subprocess.run", return_value=mock):
         from iitgpu.slurm import job_history
-        rows = job_history(str(tmp_path))
+        rows = job_history(str(jobs_root))
     assert any(r.job_id == "600" for r in rows)
 
 

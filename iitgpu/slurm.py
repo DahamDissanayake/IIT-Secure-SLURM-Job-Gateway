@@ -414,8 +414,13 @@ def job_history(search_root: str, limit: int = 20) -> list[QueueEntry]:
 def recent_jobs(search_root: str, limit: int = 2) -> list[QueueEntry]:
     """Return up to `limit` recently completed jobs by scanning output files."""
     try:
+        # Job output always lives exactly two levels down: {jobs}/{user}/{job}/
+        # slurm-*.out. A recursive rglob() would also descend into every job's
+        # data/script/checkpoint subfolders across every user on every refresh,
+        # which turned into a serious NFS/LAN load as the shared tree grew —
+        # this bounded glob only lists the two known levels.
         out_files = sorted(
-            Path(search_root).rglob("slurm-*.out"),
+            Path(search_root).glob("*/*/slurm-*.out"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )[:limit]

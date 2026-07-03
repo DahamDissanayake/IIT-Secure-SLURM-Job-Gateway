@@ -34,7 +34,11 @@ def test_find_job_log_returns_none_when_no_file(tmp_path):
 
 
 def test_find_job_log_finds_matching_file(tmp_path):
-    log = tmp_path / "slurm-42.out"
+    # search_root is a user's job dir; the file sits one level down inside
+    # its own job folder, e.g. {user_dir}/{job_folder}/slurm-<id>.out.
+    job_dir = tmp_path / "train_20260530_120000"
+    job_dir.mkdir()
+    log = job_dir / "slurm-42.out"
     log.write_text("output")
     from iitgpu.dashboard import _find_job_log
     result = _find_job_log("42", str(tmp_path))
@@ -236,9 +240,11 @@ def test_time_remaining_completed_returns_none():
 
 def test_is_jupyter_job_detects_marker(tmp_path):
     """_is_jupyter_job returns True when .iit-jupyter exists in the job folder."""
-    log = tmp_path / "slurm-10.out"
+    job_dir = tmp_path / "notebook_20260530_120000"
+    job_dir.mkdir()
+    log = job_dir / "slurm-10.out"
     log.write_text("JupyterLab running")
-    (tmp_path / ".iit-jupyter").write_text("")
+    (job_dir / ".iit-jupyter").write_text("")
     from iitgpu.dashboard import _is_jupyter_job
     assert _is_jupyter_job("10", str(tmp_path)) is True
 

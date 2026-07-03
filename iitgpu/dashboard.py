@@ -80,8 +80,10 @@ def _get_log_tail(log_path: str, lines: int = 20) -> list[str]:
 
 
 def _find_job_log(job_id: str, search_root: str) -> str | None:
+    """search_root is a single user's job dir; the file is one level down at
+    {search_root}/{job_folder}/slurm-<id>.out — no need to recurse further."""
     target = f"slurm-{job_id}.out"
-    for p in Path(search_root).rglob(target):
+    for p in Path(search_root).glob(f"*/{target}"):
         return str(p)
     return None
 
@@ -526,10 +528,16 @@ def run_dashboard(job_id: str | None = None) -> None:
         sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
         is_own = sel and sel.user == current_user
         lookup_id = sel.job_id if (is_own or _admin) else None
+        owner_user = sel.user if (lookup_id and sel) else None
         if lookup_id is None and pinned_job_id:
             lookup_id = pinned_job_id
+            owner_user = next((j.user for j in jobs if j.job_id == pinned_job_id),
+                               current_user)
         if lookup_id:
-            lines, path = _get_job_output(lookup_id, jdir)
+            # Scope the log search to the job owner's folder — rglob-ing the
+            # whole jobs_dir (every user's history) on every 2s refresh tick
+            # was hammering NFS and made the dashboard crawl on the shared LAN.
+            lines, path = _get_job_output(lookup_id, str(Path(jdir) / owner_user))
         else:
             lines, path = [], None
         _log_lines[0]    = lines
@@ -537,7 +545,7 @@ def run_dashboard(job_id: str | None = None) -> None:
         _last_data_ts[0] = time.monotonic()
         # detect jupyter + 30-min warning (own jobs only)
         if sel and is_own and sel.job_id:
-            _is_jupyter[0] = _is_jupyter_job(sel.job_id, jdir)
+            _is_jupyter[0] = _is_jupyter_job(sel.job_id, str(Path(jdir) / sel.user))
             remaining = _time_remaining(sel)
             if (remaining is not None
                     and remaining < 1800
