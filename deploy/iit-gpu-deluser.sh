@@ -39,6 +39,11 @@ run() { if [ "$DRY" = 1 ]; then echo "  [dry-run] $*"; else eval "$@"; fi; }
 step "Removing SLURM association ..."
 run "sacctmgr -i delete user $USERNAME 2>/dev/null || true"; ok "assoc removed"
 
+step "Cancelling any active/queued SLURM jobs ..."
+run "scancel -u $USERNAME 2>/dev/null || true"
+[ "$DRY" = 1 ] || sleep 2   # give slurmd a moment to reap the job's processes
+ok "jobs cancelled"
+
 step "Handling /shared/users data (on the NFS server; root_squash-safe) ..."
 USER_DATA="${NFS_ROOT}/users/${USERNAME}"
 if [ "$PURGE" = 1 ]; then
@@ -53,12 +58,36 @@ else
 fi
 
 step "Removing user on GPU host ..."
-run "ssh $GPU_HOST_SSH \"sudo userdel $USERNAME 2>/dev/null || true; sudo groupdel $USERNAME 2>/dev/null || true\""
+if [ "$DRY" = 1 ]; then
+    echo "  [dry-run] userdel -r $USERNAME; groupdel $USERNAME  (on GPU host)"
+else
+    # userdel silently no-ops on a still-busy account (e.g. a leftover job
+    # process) unless we check afterwards — a masked failure here previously
+    # left the OS account alive while the tool reported the offboard as done.
+    ssh "$GPU_HOST_SSH" "
+        sudo userdel -r '$USERNAME' 2>/dev/null
+        sudo groupdel '$USERNAME' 2>/dev/null
+        ! id '$USERNAME' >/dev/null 2>&1
+    " && _gpu_gone=1 || _gpu_gone=0
+    [ "$_gpu_gone" = 1 ] || fail "GPU host account $USERNAME still exists after userdel (a leftover job process is likely holding it open — retry, or check 'ps -u $USERNAME' on the GPU host)"
+fi
 ok "GPU host cleaned"
 
 step "Removing user on login node ..."
-run "userdel -r $USERNAME 2>/dev/null || true"
-run "groupdel $USERNAME 2>/dev/null || true"
+if [ "$DRY" = 1 ]; then
+    echo "  [dry-run] pkill -u $USERNAME; userdel -r $USERNAME; groupdel $USERNAME  (on login node)"
+else
+    # Kick any live login/TUI session first — otherwise userdel refuses to
+    # remove an account that's "currently used by process N", the exact
+    # silent-failure mode that let offboarded users keep logging in.
+    pkill -KILL -u "$USERNAME" 2>/dev/null || true
+    sleep 1
+    userdel -r "$USERNAME" 2>/dev/null || true
+    groupdel "$USERNAME" 2>/dev/null || true
+    if id "$USERNAME" >/dev/null 2>&1; then
+        fail "login account $USERNAME still exists after userdel (an active session/process is likely blocking removal — retry, or check 'ps -u $USERNAME')"
+    fi
+fi
 ok "login cleaned"
 
 # ── Update users.db via daemon (best-effort; daemon must be running) ──────────
