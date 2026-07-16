@@ -10,6 +10,7 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from iitgpu.config import load_config, jobs_dir
@@ -293,10 +294,18 @@ def _build_layout(
     elif log_lines:
         panel_h = max(3, console.height - jobs_height - 6)
         total = len(log_lines)
+        # Tentative slice assuming no scroll-position header. If that clips
+        # content (start > 0), the header itself will consume one of the
+        # panel's rows, so redo the slice with one fewer row available —
+        # otherwise the header pushes the last line of content past the
+        # panel's fixed height and it gets silently cropped.
         scroll = min(log_scroll, max(0, total - panel_h))
         start = max(0, total - panel_h - scroll)
-        visible = log_lines[start:start + panel_h]
         if start > 0:
+            avail = max(1, panel_h - 1)
+            scroll = min(log_scroll, max(0, total - avail))
+            start = max(0, total - avail - scroll)
+            visible = log_lines[start:start + avail]
             end_line = start + len(visible)
             log_body = (
                 f"[dim]↑ {start} lines above  ·  {start+1}–{end_line}/{total}"
@@ -304,6 +313,7 @@ def _build_layout(
                 + "\n".join(visible)
             )
         else:
+            visible = log_lines[start:start + panel_h]
             log_body = "\n".join(visible)
     elif selected_job.state == "CANCELLED":
         log_body = "[yellow]Job was cancelled.[/]"
@@ -314,7 +324,13 @@ def _build_layout(
     else:
         log_body = "[dim]Waiting for job to start...[/]"
 
-    layout["log"].update(Panel(log_body, title=log_title, border_style="cyan"))
+    # no_wrap: a log line wider than the panel would otherwise wrap onto
+    # extra terminal rows the fixed-height panel_h slice above didn't budget
+    # for, silently cropping later lines (e.g. the SSH-tunnel command/link)
+    # off the bottom. Crop with an ellipsis instead so 1 source line = 1 row.
+    log_text = Text.from_markup(log_body, overflow="ellipsis")
+    log_text.no_wrap = True
+    layout["log"].update(Panel(log_text, title=log_title, border_style="cyan"))
     _active = selected_job and selected_job.state not in ("COMPLETED", "FAILED", "CANCELLED")
     can_cancel = bool(_active and (is_own_job or is_admin))
     can_extend = (is_own_job and is_jupyter
