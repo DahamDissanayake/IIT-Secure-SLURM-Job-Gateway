@@ -14,7 +14,8 @@ from rich.text import Text
 from rich import box
 
 from iitgpu.config import load_config, jobs_dir
-from iitgpu.slurm import NodeStats, QueueEntry, cancel, extend_job_time, get_node_stats, queue, recent_jobs, _effective_user
+from iitgpu.slurm import (NodeStats, QueueEntry, cancel, extend_job_time, get_node_stats,
+                          queue, filtered_history, _effective_user)
 from iitgpu.ui import console, err, ok
 
 try:
@@ -503,7 +504,13 @@ def _wait_key(timeout: float) -> str | None:
 def _merged_jobs(jdir: str) -> list[QueueEntry]:
     live = queue(all_users=True)
     live_ids = {j.job_id for j in live}
-    done = [j for j in recent_jobs(jdir, limit=_COMPLETED_HISTORY) if j.job_id not in live_ids]
+    # filtered_history prefers sacct's authoritative state (all_users=True) and
+    # only falls back to the file-scan heuristic in recent_jobs() when sacct is
+    # disabled. The file-scan heuristic can't tell a clean scancel/exit from a
+    # crash for jobs (like notebooks) that routinely log to stderr, so recent
+    # jobs would otherwise show as FAILED even when sacct says CANCELLED.
+    done_all = filtered_history(jdir, limit=_COMPLETED_HISTORY, all_users=True)
+    done = [j for j in done_all if j.job_id not in live_ids]
     return live + done
 
 

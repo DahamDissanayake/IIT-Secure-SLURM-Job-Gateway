@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -442,12 +443,30 @@ def recent_jobs(search_root: str, limit: int = 2) -> list[QueueEntry]:
         # Elapsed: birth time via `stat --format=%W` (ext4/btrfs birthtime)
         time_used = _stat_elapsed(f)
 
+        # This file-scan path only runs when sacct is unavailable (see
+        # job_history()/filtered_history()), so it has no authoritative exit
+        # state to go on. A non-empty .err does NOT mean the job failed —
+        # interactive services (JupyterLab, TensorBoard) always log routine
+        # INFO/WARNING lines to stderr, so treating any content as FAILED
+        # mislabels every clean-exit or user-cancelled notebook job. Prefer
+        # SLURM's own epilogue line (written when a job is killed by a signal,
+        # e.g. scancel or a time-limit) for the real state; a traceback is a
+        # real failure regardless of job type; otherwise only flag FAILED
+        # if this isn't a known interactive-service job.
         err_file = f.with_suffix(".err")
+        state = "COMPLETED"
         try:
-            failed = err_file.exists() and err_file.stat().st_size > 0
+            if err_file.exists():
+                err_text = err_file.read_text(errors="replace")
+                m = re.search(r"\*\*\* JOB \d+ ON \S+ (\w+) AT ", err_text)
+                if m:
+                    state = m.group(1).upper()
+                elif "Traceback (most recent call last)" in err_text:
+                    state = "FAILED"
+                elif err_text.strip() and not (f.parent / ".iit-jupyter").exists():
+                    state = "FAILED"
         except OSError:
-            failed = False
-        state = "FAILED" if failed else "COMPLETED"
+            pass
 
         # Time limit: parse from job.sbatch in same directory
         time_limit = _parse_sbatch_time_limit(f.parent / "job.sbatch")

@@ -204,7 +204,7 @@ def test_merged_jobs_calls_queue_with_all_users(monkeypatch):
         calls.append(kw)
         return []
     with patch("iitgpu.dashboard.queue", fake_queue), \
-         patch("iitgpu.dashboard.recent_jobs", return_value=[]):
+         patch("iitgpu.dashboard.filtered_history", return_value=[]):
         _merged_jobs("/tmp/fake_jobs")
     assert calls and calls[0].get("all_users") is True, (
         "_merged_jobs did not call queue(all_users=True): calls=%s" % calls

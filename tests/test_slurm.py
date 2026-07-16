@@ -145,6 +145,79 @@ def test_job_history_falls_back_when_sacct_returns_empty(tmp_path, monkeypatch):
     assert any(r.job_id == "600" for r in rows)
 
 
+# ── recent_jobs state detection (file-scan fallback, no sacct) ────────────────
+# recent_jobs() has no exit code to go on, so a non-empty .err used to be
+# treated as an automatic FAILED. That mislabels interactive-service jobs
+# (JupyterLab, TensorBoard) which always log routine INFO/WARNING lines to
+# stderr — a cleanly scancel'd or finished notebook job would show FAILED even
+# though it never crashed. These lock in the fix: prefer SLURM's own epilogue
+# line for the real state, and don't blame routine Jupyter logging as a failure.
+
+def test_recent_jobs_uses_slurm_epilogue_state(tmp_path):
+    from iitgpu.slurm import recent_jobs
+    job_dir = tmp_path / "jobs" / "amasha" / "notebook_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "slurm-269.out").write_text("stdout\n")
+    (job_dir / "slurm-269.err").write_text(
+        "[I 2026-07-16 ServerApp] some routine info\n"
+        "[2026-07-16T12:47:03.327] error: *** JOB 269 ON iit-MS-7E06 CANCELLED "
+        "AT 2026-07-16T12:47:03 DUE to SIGNAL Terminated ***\n"
+    )
+    rows = recent_jobs(str(tmp_path / "jobs"), limit=5)
+    assert rows[0].state == "CANCELLED"
+
+
+def test_recent_jobs_does_not_fail_notebook_for_routine_stderr(tmp_path):
+    from iitgpu.slurm import recent_jobs
+    job_dir = tmp_path / "jobs" / "amasha" / "notebook_2"
+    job_dir.mkdir(parents=True)
+    (job_dir / ".iit-jupyter").write_text("")
+    (job_dir / "slurm-300.out").write_text("stdout\n")
+    (job_dir / "slurm-300.err").write_text(
+        "[I 2026-07-16 ServerApp] JupyterLab extension loaded from ...\n"
+        "[W 2026-07-16 LabApp] Could not determine jupyterlab build status without nodejs\n"
+    )
+    rows = recent_jobs(str(tmp_path / "jobs"), limit=5)
+    assert rows[0].state == "COMPLETED"
+
+
+def test_recent_jobs_still_flags_traceback_as_failed(tmp_path):
+    from iitgpu.slurm import recent_jobs
+    job_dir = tmp_path / "jobs" / "daham" / "train_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / ".iit-jupyter").write_text("")  # even a jupyter job, a real crash still counts
+    (job_dir / "slurm-400.out").write_text("training...\n")
+    (job_dir / "slurm-400.err").write_text(
+        "Traceback (most recent call last):\n  File \"x.py\", line 1\nValueError: boom\n"
+    )
+    rows = recent_jobs(str(tmp_path / "jobs"), limit=5)
+    assert rows[0].state == "FAILED"
+
+
+def test_recent_jobs_flags_failed_for_plain_script_stderr(tmp_path):
+    """Non-notebook jobs keep the old behavior: any stderr content is FAILED."""
+    from iitgpu.slurm import recent_jobs
+    job_dir = tmp_path / "jobs" / "daham" / "train_2"
+    job_dir.mkdir(parents=True)
+    (job_dir / "slurm-401.out").write_text("training...\n")
+    (job_dir / "slurm-401.err").write_text("some warning printed by the script\n")
+    rows = recent_jobs(str(tmp_path / "jobs"), limit=5)
+    assert rows[0].state == "FAILED"
+
+
+def test_recent_jobs_completed_when_err_empty():
+    from iitgpu.slurm import recent_jobs
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        from pathlib import Path
+        job_dir = Path(td) / "jobs" / "daham" / "train_3"
+        job_dir.mkdir(parents=True)
+        (job_dir / "slurm-402.out").write_text("training...\n")
+        (job_dir / "slurm-402.err").write_text("")
+        rows = recent_jobs(str(Path(td) / "jobs"), limit=5)
+        assert rows[0].state == "COMPLETED"
+
+
 # ── config.SACCT_ENABLED ──────────────────────────────────────────────────────
 
 def test_config_sacct_enabled_explicit_true(monkeypatch):

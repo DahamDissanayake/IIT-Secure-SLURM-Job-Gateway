@@ -8,6 +8,8 @@
 #   --admin       → gpuusers + gpuadmins; forced-TUI + admin panel; audited
 #   --shell-user  → NO gpuusers / NO gpuadmins; real bash shell; NOT audited
 #                   Still gets a SLURM association and /shared/users/<user>.
+#                   Also joins the `docker` group on the login node (only node
+#                   with a Docker daemon), so they can use docker without sudo.
 #
 # --admin and --shell-user are mutually exclusive.
 #
@@ -24,6 +26,7 @@ SITE_ENV="${IIT_SITE_ENV:-/opt/iit-gpu/deploy/site.env}"
 
 GPUUSERS_GROUP="${GPUUSERS_GROUP:-gpuusers}"
 ADMIN_GROUP="${ADMIN_GROUP:-gpuadmins}"
+DOCKER_GROUP="${DOCKER_GROUP:-docker}"
 NFS_ROOT="${NFS_ROOT:-/shared}"
 SLURM_ACCOUNT="${SLURM_ACCOUNT:-default}"
 SLURM_QOS="${SLURM_QOS:-normal}"
@@ -85,6 +88,11 @@ run "useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || tr
 run "chown -R $NEW_UID:$NEW_UID /home/$USERNAME"
 if [ "$SHELL_USER" = 0 ]; then
     run "usermod -aG $GPUUSERS_GROUP $USERNAME"
+else
+    # Shell users get a real login on this node, so give them docker access
+    # here (only) rather than sudo, matching how gpuusers get GPU access via
+    # a group rather than sudo.
+    run "getent group $DOCKER_GROUP >/dev/null 2>&1 && usermod -aG $DOCKER_GROUP $USERNAME || true"
 fi
 [ "$ADMIN" = 1 ] && run "getent group $ADMIN_GROUP >/dev/null 2>&1 && usermod -aG $ADMIN_GROUP $USERNAME || true"
 ok "login: $USERNAME created"
@@ -159,6 +167,7 @@ if [ "$SHELL_USER" = 1 ]; then
     echo "    sudo passwd $USERNAME"
     echo "NOTE: $USERNAME has a real shell. Their activity is NOT audited by the tool."
     echo "      They are subject to SLURM gres/gpu limits via their association."
+    echo "      They are in the '$DOCKER_GROUP' group on this (login) node."
 else
     echo "Done. Set a password or install an SSH key:"
     echo "    sudo passwd $USERNAME            # or: install ~$USERNAME/.ssh/authorized_keys"
