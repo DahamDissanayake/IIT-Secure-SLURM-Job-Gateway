@@ -42,7 +42,9 @@ for u in slurmadmin dahamadmin indrajith; do
 done
 ```
 
-Expected now: all three print `MISSING`.
+Expected now: all three print `MISSING`. Note `slurmadmin` has no account on
+the GPU host at all — the script skips it, which is correct; only `dahamadmin`,
+`indrajith` and `daham` can be members there.
 
 - [ ] **Step 2: Write the sync script**
 
@@ -398,9 +400,14 @@ echo "done"
 
 - [ ] **Step 4: Run the fixer on the GPU host**
 
+**Transport note:** `ssh` from the login node **to** the GPU host is not available
+(`Permission denied (publickey,password)`). Only GPU host → login node works.
+Your shell already runs on the GPU host, so **pull** files across; never push.
+
 ```bash
-scp deploy/fix-shared-perms.sh root-daham@192.168.122.1:/tmp/
-ssh root-daham@192.168.122.1 "sudo bash /tmp/fix-shared-perms.sh"
+ssh -o BatchMode=yes slurmadmin@192.168.122.10 \
+  'cat ~/IIT-Secure-SLURM-Job-Gateway/deploy/fix-shared-perms.sh' > /tmp/fix-shared-perms.sh
+sudo bash /tmp/fix-shared-perms.sh
 ```
 
 Expected: every shared dir and every user/job area listed, no errors.
@@ -419,8 +426,8 @@ Expected: `shared permissions OK`, `exit=0`.
 # a non-admin must be denied both areas of another user
 sudo -u yenuli ls /shared/users/dahamadmin  2>&1 | tail -1
 sudo -u yenuli ls /shared/jobs/dahamadmin   2>&1 | tail -1
-# an admin must still get in — run ON THE GPU HOST, where Task 1 synced the group
-ssh root-daham@192.168.122.1 "sudo -u dahamadmin ls /shared/users/daham >/dev/null && echo 'admin OK'"
+# an admin must still get in — run these two ON THE GPU HOST (your shell is there)
+sudo -u dahamadmin ls /shared/users/daham >/dev/null && echo 'admin OK'
 ```
 
 Expected: two `Permission denied` lines, then `admin OK`.
@@ -488,10 +495,11 @@ Expected: `shared permissions OK`, deploy continues.
 - [ ] **Step 4: Verify the gate actually catches drift**
 
 ```bash
-ssh root-daham@192.168.122.1 "sudo chmod 0777 /shared/users/tuser"
-bash deploy/check-shared-perms.sh; echo "exit=$?"
-ssh root-daham@192.168.122.1 "sudo chmod 2770 /shared/users/tuser"
-bash deploy/check-shared-perms.sh; echo "exit=$?"
+# chmod runs on the GPU host; the checker runs on the login node
+sudo chmod 0777 /shared/users/tuser
+ssh -o BatchMode=yes slurmadmin@192.168.122.10 'cd ~/IIT-Secure-SLURM-Job-Gateway && bash deploy/check-shared-perms.sh; echo "exit=$?"'
+sudo chmod 2770 /shared/users/tuser
+ssh -o BatchMode=yes slurmadmin@192.168.122.10 'cd ~/IIT-Secure-SLURM-Job-Gateway && bash deploy/check-shared-perms.sh; echo "exit=$?"'
 ```
 
 Expected: `EXPOSED .../tuser mode=777` and `exit=1`, then `shared permissions OK` and `exit=0`.
@@ -990,9 +998,10 @@ Expected: permission gate passes, 661 tests pass, `Deploy complete`.
 - [ ] **Step 2: Verify the access rule live**
 
 ```bash
+# all three run ON THE GPU HOST
 sudo -u yenuli ls /shared/users/dahamadmin 2>&1 | tail -1
 sudo -u yenuli ls /shared/jobs/dahamadmin  2>&1 | tail -1
-ssh root-daham@192.168.122.1 "sudo -u dahamadmin ls /shared/users/daham >/dev/null && echo 'admin OK'"
+sudo -u dahamadmin ls /shared/users/daham >/dev/null && echo 'admin OK'
 ```
 
 Expected: two `Permission denied`, then `admin OK`.
@@ -1060,6 +1069,6 @@ Minor bump rather than patch: the access model and the notebook's visible root b
 
 Each task is independently revertible.
 
-- Tasks 1, 4 — `ssh root-daham@192.168.122.1 "sudo chmod 0777 /shared/users/<u>"` restores an area; `gpasswd -d <user> gpuadmins` undoes the group sync.
+- Tasks 1, 4 — on the GPU host: `sudo chmod 0777 /shared/users/<u>` restores an area; `sudo gpasswd -d <user> gpuadmins` undoes the group sync.
 - Tasks 2, 3, 5–10 — `git revert <sha>` then redeploy.
 - Task 10 is the only user-visible change; reverting restores `--notebook-dir=/shared`.
