@@ -536,7 +536,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         from iitgpu.jobs import build_interactive_cmd
         spec = JobSpec(
             job_name="interactive", partition=cfg.partition,
-            gpus=defaults.gpus, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
+            gpu_shards=defaults.gpu_shards, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
             time_limit=defaults.time_limit or "02:00:00", run_command="",
             task_type="interactive",
         )
@@ -576,7 +576,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     ).ask():
         _byp_folder = make_job_folder(jdir, JobSpec(
             job_name=task_type, partition=cfg.partition,
-            gpus=defaults.gpus, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
+            gpu_shards=defaults.gpu_shards, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
             time_limit=defaults.time_limit or "02:00:00", run_command="",
             task_type=task_type,
         ))
@@ -856,7 +856,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         spec = JobSpec(
             job_name=job_name,
             partition="gpu",
-            gpus=defaults.gpus,
+            gpu_shards=defaults.gpu_shards,
             cpus=defaults.cpus,
             mem_gb=defaults.mem_gb,
             time_limit=nb_time_limit,
@@ -1043,7 +1043,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     spec = JobSpec(
         job_name=job_name,
         partition="gpu",
-        gpus=defaults.gpus,
+        gpu_shards=defaults.gpu_shards,
         cpus=defaults.cpus,
         mem_gb=defaults.mem_gb,
         time_limit=defaults.time_limit,

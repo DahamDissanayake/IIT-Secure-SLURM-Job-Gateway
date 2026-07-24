@@ -51,7 +51,7 @@ def test_smoke_test_script_contains_cuda_check(tmp_path, monkeypatch):
     out_dir = str(tmp_path / "jobs" / "testuser" / "smoke_test")
     script = _build_smoke_test_script("/shared/envs/pytorch-2.5", load_config(), out_dir)
     assert "torch.cuda.is_available()" in script
-    assert "#SBATCH --gres=gpu:1" in script
+    assert "#SBATCH --gres=shard:1" in script
 
 
 def test_smoke_test_script_output_under_shared(tmp_path, monkeypatch):

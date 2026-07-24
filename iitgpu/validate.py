@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 
 MAX_GPUS = int(os.environ.get("MAX_GPUS", "8"))
+# GPU slices (gres/shard), not whole GPUs — a request of shard:4 is one card
+# split four ways, so it must not be measured against MAX_GPUS.
+MAX_GPU_SHARDS = int(os.environ.get("MAX_GPU_SHARDS", "4"))
 MAX_CPUS = int(os.environ.get("MAX_CPUS", "64"))
 MAX_MEM_GB = int(os.environ.get("MAX_MEM_GB", "256"))
 MAX_HOURS = int(os.environ.get("MAX_HOURS", "72"))
@@ -286,11 +289,17 @@ def validate_sbatch(text: str, username: str, cfg=None) -> list[str]:
         elif key in ("gres", "gpus", "gpus-per-task"):
             try:
                 n = int(val.split(":")[-1])
-                if n > MAX_GPUS:
-                    errors.append(
-                        f"--{key} requests {n} GPUs; cluster limit is {MAX_GPUS}")
             except (ValueError, IndexError):
                 pass
+            else:
+                if key == "gres" and val.lower().lstrip("-").startswith("shard"):
+                    if n > MAX_GPU_SHARDS:
+                        errors.append(
+                            f"--gres requests {n} GPU slices; "
+                            f"the cluster has {MAX_GPU_SHARDS}")
+                elif n > MAX_GPUS:
+                    errors.append(
+                        f"--{key} requests {n} GPUs; cluster limit is {MAX_GPUS}")
 
         elif key == "cpus-per-task":
             try:
@@ -314,13 +323,17 @@ def validate_sbatch(text: str, username: str, cfg=None) -> list[str]:
     return errors
 
 
-def validate_against_qos(gpus: int, time_limit: str, max_gpus_per_user: int = 1,
+def validate_against_qos(gpu_shards: int, time_limit: str,
+                         max_shards_per_user: int = 1,
                          max_hours: int | None = None) -> tuple[bool, str]:
     """Reject out-of-policy requests before submission.
-    Returns (ok, message). Generic — caller passes the QOS limits."""
-    if gpus > max_gpus_per_user:
-        return False, (f"Requested {gpus} GPUs but your QOS allows "
-                       f"{max_gpus_per_user} per user.")
+    Returns (ok, message). Generic — caller passes the QOS limits.
+
+    Counts GPU slices (gres/shard), matching how the QOS caps usage.
+    """
+    if gpu_shards > max_shards_per_user:
+        return False, (f"Requested {gpu_shards} GPU slices but your QOS allows "
+                       f"{max_shards_per_user} per user.")
     if max_hours is not None and time_limit:
         m = _TIME_RE.match(time_limit)
         if m and int(m.group(1)) > max_hours:

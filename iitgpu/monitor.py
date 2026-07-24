@@ -277,9 +277,11 @@ def _parse_sbatch(sbatch_text: str) -> dict:
         m = re.match(r"#SBATCH\s+--partition=(.+)", line)
         if m:
             result["partition"] = m.group(1).strip()
-        m = re.match(r"#SBATCH\s+--gres=gpu:(\d+)", line)
+        # Jobs request GPU slices (shard:N); older scripts on disk still say
+        # gpu:N, so accept both when re-running an archived job.
+        m = re.match(r"#SBATCH\s+--gres=(?:shard|gpu):(\d+)", line)
         if m:
-            result["gpus"] = int(m.group(1))
+            result["gpu_shards"] = int(m.group(1))
         m = re.match(r"#SBATCH\s+--cpus-per-task=(\d+)", line)
         if m:
             result["cpus"] = int(m.group(1))

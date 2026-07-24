@@ -8,7 +8,7 @@ from iitgpu.slurm import QueueEntry
 
 
 def _spec(**kw):
-    base = dict(job_name="j", partition="gpu", gpus=1, cpus=4, mem_gb=8,
+    base = dict(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                 time_limit="01:00:00", run_command="python x.py")
     base.update(kw); return JobSpec(**base)
 

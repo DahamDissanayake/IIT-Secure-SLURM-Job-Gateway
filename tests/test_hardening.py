@@ -16,7 +16,7 @@ def test_make_job_folder_uses_0o770(tmp_path):
     spec = JobSpec(
         job_name="sec_test",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=8,
         time_limit="00:30:00",
@@ -38,7 +38,7 @@ def test_make_job_folder_no_world_readable(tmp_path):
     spec = JobSpec(
         job_name="sec_test2",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=8,
         time_limit="",
@@ -102,7 +102,7 @@ def test_make_job_folder_chowns_to_gpuusers(tmp_path):
     spec = JobSpec(
         job_name="chown_test",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=8,
         time_limit="",
@@ -132,7 +132,7 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
     spec = JobSpec(
         job_name="chown_fail",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=8,
         time_limit="",

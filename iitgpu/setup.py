@@ -147,7 +147,7 @@ def _build_smoke_test_script(env_path: str, cfg: Config, out_dir: str) -> str:
         "#!/bin/bash",
         "#SBATCH --job-name=smoke_test",
         "#SBATCH --partition=gpu",
-        "#SBATCH --gres=gpu:1",
+        "#SBATCH --gres=shard:1",
         "#SBATCH --cpus-per-task=4",
         "#SBATCH --mem=16G",
         "#SBATCH --time=00:05:00",

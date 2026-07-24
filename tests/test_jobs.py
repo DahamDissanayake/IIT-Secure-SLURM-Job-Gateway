@@ -9,7 +9,7 @@ def _spec(**kwargs) -> JobSpec:
     defaults = dict(
         job_name="train_model",
         partition="gpu-short",
-        gpus=2,
+        gpu_shards=2,
         cpus=8,
         mem_gb=32,
         time_limit="04:00:00",
@@ -51,8 +51,8 @@ def test_render_sbatch_job_name(tmp_path):
 
 
 def test_render_sbatch_gres_gpu(tmp_path):
-    folder = make_job_folder(str(tmp_path), _spec(gpus=3))
-    assert "#SBATCH --gres=gpu:3" in render_sbatch(_spec(gpus=3), folder)
+    folder = make_job_folder(str(tmp_path), _spec(gpu_shards=3))
+    assert "#SBATCH --gres=shard:3" in render_sbatch(_spec(gpu_shards=3), folder)
 
 
 def test_render_sbatch_cpus(tmp_path):
@@ -105,7 +105,7 @@ from iitgpu.jobs import TaskDefaults, resource_defaults, TASK_DEFAULTS
 
 def test_resource_defaults_train():
     d = resource_defaults("train")
-    assert d.gpus == 1
+    assert d.gpu_shards == 4
     assert d.cpus == 16
     assert d.mem_gb == 60
     assert d.time_limit == ""

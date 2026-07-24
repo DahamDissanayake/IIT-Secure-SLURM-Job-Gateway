@@ -234,7 +234,7 @@ def test_job_folder_uses_lk_time(tmp_path, monkeypatch):
 
     from unittest.mock import patch
     from iitgpu.jobs import JobSpec, make_job_folder
-    spec = JobSpec(job_name="test", partition="gpu", gpus=1, cpus=4,
+    spec = JobSpec(job_name="test", partition="gpu", gpu_shards=1, cpus=4,
                    mem_gb=8, time_limit="01:00:00", run_command="python x.py")
     with patch("iitgpu.jobs.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_lk

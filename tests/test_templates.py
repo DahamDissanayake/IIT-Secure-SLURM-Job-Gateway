@@ -5,9 +5,14 @@ import pytest
 
 def test_builtin_presets_gpu_count_matches_cluster(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
+    from iitgpu.jobs import SHARDS_PER_GPU
     from iitgpu.templates import _BUILTIN_PRESETS
     for name, preset in _BUILTIN_PRESETS.items():
-        assert preset["gpus"] <= 1, f"Preset '{name}' requests {preset['gpus']} GPUs but cluster has 1"
+        shards = preset["gpu_shards"]
+        assert shards <= SHARDS_PER_GPU, (
+            f"Preset '{name}' requests {shards} GPU slices "
+            f"but the cluster has {SHARDS_PER_GPU}"
+        )
 
 
 def test_builtin_presets_cpus_within_cluster_limit(tmp_path, monkeypatch):

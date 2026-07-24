@@ -90,7 +90,7 @@ def launch_tensorboard() -> None:
         port = 6006
 
     d = resource_defaults("inference")
-    spec = JobSpec(job_name="tensorboard", partition=cfg.partition, gpus=0,
+    spec = JobSpec(job_name="tensorboard", partition=cfg.partition, gpu_shards=0,
                    cpus=2, mem_gb=8, time_limit="08:00:00", run_command="",
                    task_type="tensorboard")
     # Auto-populate SLURM mail directive from users.db if an MTA is available.

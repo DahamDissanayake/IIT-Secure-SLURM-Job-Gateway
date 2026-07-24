@@ -25,7 +25,7 @@ _BUILTIN_PRESETS: dict[str, dict] = {
     "PyTorch Training": {
         "job_name": "pytorch_train",
         "partition": "gpu",
-        "gpus": 1,
+        "gpu_shards": 4,
         "cpus": 16,
         "mem_gb": 60,
         "time_limit": "",
@@ -40,7 +40,7 @@ _BUILTIN_PRESETS: dict[str, dict] = {
     "HuggingFace Fine-tune": {
         "job_name": "hf_finetune",
         "partition": "gpu",
-        "gpus": 1,
+        "gpu_shards": 4,
         "cpus": 16,
         "mem_gb": 60,
         "time_limit": "",
@@ -55,7 +55,7 @@ _BUILTIN_PRESETS: dict[str, dict] = {
     "Inference / Serving": {
         "job_name": "inference",
         "partition": "gpu",
-        "gpus": 1,
+        "gpu_shards": 1,
         "cpus": 8,
         "mem_gb": 32,
         "time_limit": "04:00:00",
@@ -70,7 +70,7 @@ _BUILTIN_PRESETS: dict[str, dict] = {
     "Quick Debug": {
         "job_name": "debug_run",
         "partition": "gpu",
-        "gpus": 1,
+        "gpu_shards": 1,
         "cpus": 4,
         "mem_gb": 16,
         "time_limit": "00:30:00",

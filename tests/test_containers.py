@@ -74,7 +74,7 @@ def test_render_sbatch_container_uses_apptainer(tmp_path):
     spec = JobSpec(
         job_name="test_cont",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=8,
         mem_gb=32,
         time_limit="04:00:00",
@@ -94,7 +94,7 @@ def test_render_sbatch_container_omits_conda_activation(tmp_path):
     spec = JobSpec(
         job_name="test_cont",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=16,
         time_limit="01:00:00",
@@ -115,7 +115,7 @@ def test_render_sbatch_no_container_still_works(tmp_path):
     spec = JobSpec(
         job_name="plain_job",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=16,
         time_limit="01:00:00",
@@ -131,7 +131,7 @@ def test_render_sbatch_no_container_still_works(tmp_path):
 def test_jobspec_container_image_default_is_empty():
     from iitgpu.jobs import JobSpec
     spec = JobSpec(
-        job_name="j", partition="gpu", gpus=1, cpus=1, mem_gb=4,
+        job_name="j", partition="gpu", gpu_shards=1, cpus=1, mem_gb=4,
         time_limit="", run_command="echo hi",
     )
     assert spec.container_image == ""

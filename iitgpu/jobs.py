@@ -18,21 +18,36 @@ def _cluster_tz():
 from pathlib import Path
 
 
+# The cluster's single GPU is split into SHARDS_PER_GPU schedulable slices
+# (gres.conf: "Name=shard Count=4 File=/dev/nvidia0"), so several jobs can run
+# on it concurrently instead of one job locking the whole card. Jobs therefore
+# request --gres=shard:N, never --gres=gpu:N — asking for a whole gpu takes the
+# device *and* all its shards, which is exactly the blocking we removed.
+# Keep this in sync with gres.conf on every node.
+SHARDS_PER_GPU = 4
+
+
 @dataclass(frozen=True)
 class TaskDefaults:
-    gpus: int
+    gpu_shards: int   # GPU slices to request; SHARDS_PER_GPU == the whole card
     cpus: int
     mem_gb: int
     time_limit: str  # "" means no time limit (SLURM INFINITE)
 
 
+# Interactive/light work takes one slice so several users fit on the card at
+# once; training-shaped work still takes the whole GPU because it wants all the
+# VRAM. Shards are a *scheduling* split, not a VRAM cap — see gpu_share_note().
 TASK_DEFAULTS: dict[str, TaskDefaults] = {
-    "train":     TaskDefaults(gpus=1, cpus=16, mem_gb=60, time_limit=""),
-    "finetune":  TaskDefaults(gpus=1, cpus=16, mem_gb=60, time_limit=""),
-    "inference": TaskDefaults(gpus=1, cpus=8,  mem_gb=32, time_limit="04:00:00"),
-    "test":      TaskDefaults(gpus=1, cpus=4,  mem_gb=16, time_limit="00:30:00"),
-    "notebook":  TaskDefaults(gpus=1, cpus=8,  mem_gb=32, time_limit="08:00:00"),
-    "custom":    TaskDefaults(gpus=1, cpus=16, mem_gb=60, time_limit=""),
+    "train":     TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
+    "finetune":  TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
+    "inference": TaskDefaults(gpu_shards=1, cpus=8,  mem_gb=32, time_limit="04:00:00"),
+    "test":      TaskDefaults(gpu_shards=1, cpus=4,  mem_gb=16, time_limit="00:30:00"),
+    "notebook":  TaskDefaults(gpu_shards=1, cpus=8,  mem_gb=32, time_limit="08:00:00"),
+    # An interactive shell mostly sits idle at a prompt — one slice, so it never
+    # parks on the whole card while someone reads their scrollback.
+    "interactive": TaskDefaults(gpu_shards=1, cpus=8, mem_gb=32, time_limit="02:00:00"),
+    "custom":    TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
 }
 
 
@@ -40,11 +55,26 @@ def resource_defaults(task_type: str) -> TaskDefaults:
     return TASK_DEFAULTS.get(task_type, TASK_DEFAULTS["custom"])
 
 
+def gres_directive(gpu_shards: int) -> str:
+    """SLURM --gres value for a shard request, or "" when the job needs no GPU."""
+    return f"shard:{gpu_shards}" if gpu_shards > 0 else ""
+
+
+def gpu_share_note(gpu_shards: int) -> str:
+    """Plain-language description of how much of the GPU a request reserves."""
+    if gpu_shards <= 0:
+        return "no GPU (CPU-only)"
+    if gpu_shards >= SHARDS_PER_GPU:
+        return "the whole GPU (no one else can use it)"
+    return (f"{gpu_shards}/{SHARDS_PER_GPU} of the GPU "
+            f"({SHARDS_PER_GPU - gpu_shards}/{SHARDS_PER_GPU} left for others)")
+
+
 @dataclass
 class JobSpec:
     job_name: str
     partition: str
-    gpus: int
+    gpu_shards: int
     cpus: int
     mem_gb: int
     time_limit: str
@@ -94,10 +124,11 @@ def render_sbatch(spec: JobSpec, folder: str) -> str:
         # instead of every finetune showing up as just "finetune".
         f"#SBATCH --job-name={Path(folder).name}",
         f"#SBATCH --partition={spec.partition}",
-        f"#SBATCH --gres=gpu:{spec.gpus}",
         f"#SBATCH --cpus-per-task={spec.cpus}",
         f"#SBATCH --mem={spec.mem_gb}G",
     ]
+    if spec.gpu_shards > 0:
+        lines.append(f"#SBATCH --gres={gres_directive(spec.gpu_shards)}")
     if spec.time_limit:
         lines.append(f"#SBATCH --time={spec.time_limit}")
     if spec.array:
@@ -203,10 +234,11 @@ def build_interactive_cmd(spec: "JobSpec", partition: str = "gpu") -> list[str]:
     cmd = [
         "srun",
         f"--partition={spec.partition or partition}",
-        f"--gres=gpu:{spec.gpus}",
         f"--cpus-per-task={spec.cpus}",
         f"--mem={spec.mem_gb}G",
     ]
+    if spec.gpu_shards > 0:
+        cmd.insert(2, f"--gres={gres_directive(spec.gpu_shards)}")
     if spec.time_limit:
         cmd.append(f"--time={spec.time_limit}")
     cmd += ["--pty", "bash", "-l"]
@@ -261,10 +293,11 @@ def render_notebook_sbatch(
         "#!/bin/bash",
         f"#SBATCH --job-name={spec.job_name}",
         f"#SBATCH --partition={spec.partition}",
-        f"#SBATCH --gres=gpu:{spec.gpus}",
         f"#SBATCH --cpus-per-task={spec.cpus}",
         f"#SBATCH --mem={spec.mem_gb}G",
     ]
+    if spec.gpu_shards > 0:
+        lines.append(f"#SBATCH --gres={gres_directive(spec.gpu_shards)}")
     if spec.time_limit:
         lines.append(f"#SBATCH --time={spec.time_limit}")
     if spec.mail_user:

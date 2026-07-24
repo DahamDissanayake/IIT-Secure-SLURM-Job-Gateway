@@ -92,23 +92,34 @@ def _resource_seg(stats) -> str:
     if stats is None:
         return "[dim]cluster stats unavailable[/]"
 
-    gpu_free = max(0, stats.gpu_total - stats.gpu_alloc)
     cpu_free = max(0, stats.cpu_total - stats.cpu_alloc)
     mem_free_gb = max(0.0, (stats.mem_total_mb - stats.mem_alloc_mb) / 1024)
+    cpu_ram = f"[dim]CPU {cpu_free}/{stats.cpu_total} free · RAM {mem_free_gb:.0f}GB free[/]"
 
-    gpu_color = "green" if gpu_free > 0 else "yellow"
-    counts = (
-        f"[{gpu_color}]GPU {gpu_free}/{stats.gpu_total} free[/]  "
-        f"[dim]CPU {cpu_free}/{stats.cpu_total} free · RAM {mem_free_gb:.0f}GB free[/]"
-    )
+    # The GPU is split into slices, so what matters is how many slices are left,
+    # not whether the card is "in use" — several jobs share it.
+    if stats.shard_total:
+        free = max(0, stats.shard_total - stats.shard_alloc)
+        color = "green" if free > 0 else "yellow"
+        counts = f"[{color}]GPU {free}/{stats.shard_total} slices free[/]  {cpu_ram}"
+        if free > 0:
+            verdict = f"[bold green]✓ OK to submit — room for {free} more GPU job(s)[/]"
+        elif cpu_free > 0 and mem_free_gb > 0:
+            verdict = "[bold yellow]⚠ All GPU slices busy — CPU-only jobs can still run[/]"
+        else:
+            verdict = "[bold red]✗ Cluster full — wait for a job to finish[/]"
+        return f"{counts}  [dim]·[/]  {verdict}"
 
+    # Site without GPU sharing configured: whole-GPU accounting.
+    gpu_free = max(0, stats.gpu_total - stats.gpu_alloc)
+    color = "green" if gpu_free > 0 else "yellow"
+    counts = f"[{color}]GPU {gpu_free}/{stats.gpu_total} free[/]  {cpu_ram}"
     if gpu_free > 0:
         verdict = "[bold green]✓ OK to submit a GPU job now[/]"
     elif cpu_free > 0 and mem_free_gb > 0:
         verdict = "[bold yellow]⚠ GPU busy — CPU-only jobs can still run[/]"
     else:
         verdict = "[bold red]✗ Cluster full — wait for a job to finish[/]"
-
     return f"{counts}  [dim]·[/]  {verdict}"
 
 

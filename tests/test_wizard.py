@@ -165,7 +165,7 @@ def test_data_path_exported_in_sbatch_when_set(tmp_path):
     spec = JobSpec(
         job_name="test_job",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=16,
         time_limit="01:00:00",
@@ -191,7 +191,7 @@ def test_data_path_not_in_sbatch_when_not_set(tmp_path):
     spec = JobSpec(
         job_name="test_job",
         partition="gpu",
-        gpus=1,
+        gpu_shards=1,
         cpus=4,
         mem_gb=16,
         time_limit="01:00:00",
@@ -229,7 +229,7 @@ python /shared/testuser/scripts/train.py --epochs 10
     result = _parse_sbatch(sbatch)
 
     assert result.get("partition") == "gpu"
-    assert result.get("gpus") == 1
+    assert result.get("gpu_shards") == 1
     assert result.get("cpus") == 16
     assert result.get("mem_gb") == 60
     assert result.get("time_limit") == "08:00:00"
@@ -285,7 +285,7 @@ def test_mail_user_set_from_users_db_when_mta_present(tmp_path):
     """When MTA is available and users.db has an email, mail_user is auto-populated."""
     from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
 
-    spec = JobSpec(job_name="j", partition="gpu", gpus=1, cpus=4, mem_gb=8,
+    spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
     with patch("iitgpu.notify.mta_present", return_value=True), \
@@ -307,7 +307,7 @@ def test_mail_user_not_set_when_mta_absent(tmp_path):
     """When no MTA is present, mail_user stays empty even if users.db has an email."""
     from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
 
-    spec = JobSpec(job_name="j", partition="gpu", gpus=1, cpus=4, mem_gb=8,
+    spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
     with patch("iitgpu.notify.mta_present", return_value=False):
@@ -324,7 +324,7 @@ def test_mail_user_not_set_when_no_email_in_db(tmp_path):
     """When MTA is present but user has no email registered, mail_user stays empty."""
     from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
 
-    spec = JobSpec(job_name="j", partition="gpu", gpus=1, cpus=4, mem_gb=8,
+    spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
     with patch("iitgpu.notify.mta_present", return_value=True), \

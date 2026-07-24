@@ -28,8 +28,12 @@ class NodeStats:
     cpu_alloc: int
     mem_total_mb: int
     mem_alloc_mb: int
-    gpu_total: int
-    gpu_alloc: int
+    gpu_total: int          # physical GPUs on the node
+    gpu_alloc: int          # physical GPUs with at least one slice in use
+    # The GPU is split into schedulable slices (gres/shard) so several jobs can
+    # share it; these are what actually gate whether a new job can start.
+    shard_total: int = 0
+    shard_alloc: int = 0
     # Actual utilization data (from nvidia-smi via stats writer)
     gpu_util: int = 0
     gpu_mem_used_mb: int = 0
@@ -244,17 +248,33 @@ def _read_hw_stats_direct() -> dict | None:
 
 
 def _count_running_gpu_jobs() -> int:
-    """Return number of currently RUNNING jobs that requested a GPU.
-    Used because AllocTRES omits GPU on this SLURM build."""
+    """Return number of currently RUNNING jobs holding any slice of a GPU.
+
+    Matches both shard: and gpu: requests — jobs normally ask for shards, but a
+    script written before sharding may still ask for a whole gpu.
+    """
     try:
         r = subprocess.run(
             _gateway_prefix() + ["squeue", "--noheader",
              "--states=RUNNING", "--format=%b"],   # %b = requested GRES
             capture_output=True, text=True, timeout=5,
         )
-        return sum(1 for line in r.stdout.splitlines() if "gpu" in line.lower())
+        return sum(1 for line in r.stdout.splitlines()
+                   if "gpu" in line.lower() or "shard" in line.lower())
     except (OSError, subprocess.TimeoutExpired):
         return 0
+
+
+def _tres_value(tres: str, key: str) -> int:
+    """Pull an integer TRES count (e.g. gres/shard=3) out of a TRES string."""
+    for item in tres.split(","):
+        item = item.strip()
+        if item.startswith(key + "="):
+            try:
+                return int(item[len(key) + 1:])
+            except ValueError:
+                return 0
+    return 0
 
 
 def get_node_stats(node_name: str = "iit-MS-7E06") -> NodeStats | None:
@@ -285,16 +305,27 @@ def get_node_stats(node_name: str = "iit-MS-7E06") -> NodeStats | None:
                 return default
 
         gpu_total = 0
+        shard_total = 0
         for part in d.get("Gres", "").split(","):
-            if part.startswith("gpu:"):
+            part = part.strip()
+            for prefix, is_shard in (("gpu:", False), ("shard:", True)):
+                if not part.startswith(prefix):
+                    continue
                 try:
-                    gpu_total += int(part.rstrip(")").split(":")[-1].split("(")[0])
+                    count = int(part.rstrip(")").split(":")[-1].split("(")[0])
                 except (ValueError, IndexError):
-                    gpu_total += 1
+                    count = 1
+                if is_shard:
+                    shard_total += count
+                else:
+                    gpu_total += count
 
-        # AllocTRES doesn't include GPU on this SLURM build — count running GPU
-        # jobs from squeue instead, which is authoritative.
-        gpu_alloc    = _count_running_gpu_jobs()
+        # Shard allocation IS reported in AllocTRES, so read it directly rather
+        # than inferring from the job list.
+        shard_alloc = _tres_value(d.get("AllocTRES", ""), "gres/shard")
+        # No shards configured (site hasn't enabled GPU sharing): fall back to
+        # counting whole-GPU jobs, which is all AllocTRES exposes there.
+        gpu_alloc = (1 if shard_alloc > 0 else 0) if shard_total else _count_running_gpu_jobs()
         mem_alloc_mb = 0
         for item in d.get("AllocTRES", "").split(","):
             if item.startswith("mem="):
@@ -320,6 +351,8 @@ def get_node_stats(node_name: str = "iit-MS-7E06") -> NodeStats | None:
             mem_alloc_mb=mem_alloc_mb,
             gpu_total=gpu_total,
             gpu_alloc=gpu_alloc,
+            shard_total=shard_total,
+            shard_alloc=shard_alloc,
         )
 
         live = _read_gpu_stats_file()

@@ -7,7 +7,7 @@ from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, build_interacti
 
 
 def _spec(**kw):
-    base = dict(job_name="j", partition="gpu", gpus=1, cpus=4, mem_gb=8,
+    base = dict(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                 time_limit="01:00:00", run_command="python x.py")
     base.update(kw)
     return JobSpec(**base)
@@ -56,10 +56,10 @@ def test_no_dependency_omits_directive(tmp_path):
 # ── Interactive ────────────────────────────────────────────────────────────────
 
 def test_build_interactive_cmd_is_srun_pty():
-    cmd = build_interactive_cmd(_spec(gpus=1, cpus=8, mem_gb=16, time_limit="02:00:00"))
+    cmd = build_interactive_cmd(_spec(gpu_shards=1, cpus=8, mem_gb=16, time_limit="02:00:00"))
     assert cmd[0] == "srun"
     assert "--pty" in cmd
-    assert "--gres=gpu:1" in cmd
+    assert "--gres=shard:1" in cmd
     assert "--cpus-per-task=8" in cmd
     assert "--mem=16G" in cmd
     assert "--time=02:00:00" in cmd
@@ -103,19 +103,19 @@ def test_clean_dependency_rejects_garbage():
 
 def test_validate_against_qos_rejects_too_many_gpus():
     from iitgpu.validate import validate_against_qos
-    ok, msg = validate_against_qos(gpus=2, time_limit="01:00:00", max_gpus_per_user=1)
+    ok, msg = validate_against_qos(gpu_shards=2, time_limit="01:00:00", max_shards_per_user=1)
     assert ok is False
     assert "GPU" in msg
 
 
 def test_validate_against_qos_rejects_over_walltime():
     from iitgpu.validate import validate_against_qos
-    ok, msg = validate_against_qos(gpus=1, time_limit="48:00:00", max_gpus_per_user=1, max_hours=8)
+    ok, msg = validate_against_qos(gpu_shards=1, time_limit="48:00:00", max_shards_per_user=1, max_hours=8)
     assert ok is False
     assert "wall-time" in msg.lower()
 
 
 def test_validate_against_qos_accepts_in_policy():
     from iitgpu.validate import validate_against_qos
-    ok, _ = validate_against_qos(gpus=1, time_limit="04:00:00", max_gpus_per_user=1, max_hours=8)
+    ok, _ = validate_against_qos(gpu_shards=1, time_limit="04:00:00", max_shards_per_user=1, max_hours=8)
     assert ok is True
