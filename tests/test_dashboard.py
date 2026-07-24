@@ -459,14 +459,24 @@ def test_build_layout_footer_shows_pgupdn_hint():
 
 # ── Splash status block ───────────────────────────────────────────────────────
 
+def _stats(gpu_total=1, gpu_alloc=0, cpu_total=32, cpu_alloc=0,
+           mem_total_mb=62000, mem_alloc_mb=0):
+    from iitgpu.slurm import NodeStats
+    return NodeStats(
+        state="MIXED", cpu_load=0.0, cpu_total=cpu_total, cpu_alloc=cpu_alloc,
+        mem_total_mb=mem_total_mb, mem_alloc_mb=mem_alloc_mb,
+        gpu_total=gpu_total, gpu_alloc=gpu_alloc,
+    )
+
+
 def test_build_status_line_shows_running_job_with_user_and_time():
-    """Running job must appear with name, owner in parens, time, and GPU: Allocated."""
+    """Running job must appear with name, owner in parens, time, and a free-GPU verdict."""
     from iitgpu.slurm import QueueEntry
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
     jobs = [QueueEntry("10", "train_run", "RUNNING", "gpu", "1:23:45", 1, user="alice")]
-    panel = _build_status_line(jobs, "bob", "⠋")
+    panel = _build_status_line(jobs, _stats(gpu_alloc=1), "bob", "⠋")
 
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
@@ -476,7 +486,8 @@ def test_build_status_line_shows_running_job_with_user_and_time():
     assert "train_run" in rendered
     assert "alice" in rendered
     assert "1:23:45" in rendered
-    assert "GPU: Allocated" in rendered
+    assert "GPU 0/1 free" in rendered
+    assert "GPU busy" in rendered
 
 
 def test_build_status_line_shows_all_users_running_jobs():
@@ -489,7 +500,7 @@ def test_build_status_line_shows_all_users_running_jobs():
         QueueEntry("11", "alice_job", "RUNNING", "gpu", "0:30:00", 1, user="alice"),
         QueueEntry("12", "bob_job",   "RUNNING", "gpu", "1:00:00", 1, user="bob"),
     ]
-    panel = _build_status_line(jobs, "alice", "⠙")
+    panel = _build_status_line(jobs, _stats(gpu_alloc=1), "alice", "⠙")
 
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
@@ -501,36 +512,83 @@ def test_build_status_line_shows_all_users_running_jobs():
 
 
 def test_build_status_line_gpu_available_when_no_running_jobs():
-    """When no jobs are running, the panel must say GPU is available."""
+    """When no jobs are running, the panel must say the GPU is free and OK to submit."""
     from iitgpu.slurm import QueueEntry
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
     # Only a pending job — no running jobs
     jobs = [QueueEntry("13", "pending_job", "PENDING", "gpu", "0:00", 1, user="carol")]
-    panel = _build_status_line(jobs, "carol", "⠹")
+    panel = _build_status_line(jobs, _stats(gpu_alloc=0), "carol", "⠹")
 
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
 
-    assert "GPU is available" in rendered
+    assert "GPU 1/1 free" in rendered
+    assert "OK to submit a GPU job now" in rendered
     assert "pending_job" not in rendered
 
 
 def test_build_status_line_gpu_available_when_empty():
-    """Empty job list must show GPU is available."""
+    """Empty job list must still show the GPU as free."""
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
-    panel = _build_status_line([], "dave", "⠸")
+    panel = _build_status_line([], _stats(gpu_alloc=0), "dave", "⠸")
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)
     rendered = cap.get()
 
-    assert "GPU is available" in rendered
+    assert "GPU 1/1 free" in rendered
+    assert "OK to submit a GPU job now" in rendered
+
+
+def test_build_status_line_cpu_only_jobs_ok_when_gpu_busy():
+    """GPU fully allocated but CPU/RAM free must say CPU-only jobs can still run."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    stats = _stats(gpu_alloc=1, cpu_alloc=4, mem_alloc_mb=4096)
+    panel = _build_status_line([], stats, "erin", "⠴")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "GPU busy" in rendered
+    assert "CPU-only jobs can still run" in rendered
+
+
+def test_build_status_line_cluster_full_when_nothing_free():
+    """GPU, CPU and RAM all fully allocated must say the cluster is full."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    stats = _stats(gpu_alloc=1, cpu_alloc=32, mem_alloc_mb=62000)
+    panel = _build_status_line([], stats, "frank", "⠦")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "Cluster full" in rendered
+
+
+def test_build_status_line_handles_missing_stats():
+    """When node stats are unavailable, the panel must degrade gracefully, not crash."""
+    from iitgpu.splash import _build_status_line
+    from rich.console import Console
+
+    panel = _build_status_line([], None, "gwen", "⠧")
+    con = Console(force_terminal=True, width=200)
+    with con.capture() as cap:
+        con.print(panel)
+    rendered = cap.get()
+
+    assert "cluster stats unavailable" in rendered
 
 
 def test_build_status_line_shows_current_user():
@@ -538,7 +596,7 @@ def test_build_status_line_shows_current_user():
     from iitgpu.splash import _build_status_line
     from rich.console import Console
 
-    panel = _build_status_line([], "myuser", "⠼")
+    panel = _build_status_line([], _stats(), "myuser", "⠼")
     con = Console(force_terminal=True, width=200)
     with con.capture() as cap:
         con.print(panel)

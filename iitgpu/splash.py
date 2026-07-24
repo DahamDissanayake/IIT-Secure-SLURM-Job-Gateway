@@ -81,13 +81,43 @@ def show_splash(pause: float = 1.5) -> None:
         time.sleep(pause)
 
 
-def _build_status_line(jobs, username: str, spin: str) -> Panel:
-    """Single-line status panel: user · all running jobs (any user) with time, or GPU available."""
+def _resource_seg(stats) -> str:
+    """Free GPU/CPU/RAM + a plain-language verdict on whether another job can start now.
+
+    The cluster schedules per-resource (select/cons_tres), not per-node, so
+    "GPU busy" no longer means the node is unavailable — CPU-only jobs can
+    still start while the single GPU is in use. Spell that out rather than
+    showing one binary GPU flag.
+    """
+    if stats is None:
+        return "[dim]cluster stats unavailable[/]"
+
+    gpu_free = max(0, stats.gpu_total - stats.gpu_alloc)
+    cpu_free = max(0, stats.cpu_total - stats.cpu_alloc)
+    mem_free_gb = max(0.0, (stats.mem_total_mb - stats.mem_alloc_mb) / 1024)
+
+    gpu_color = "green" if gpu_free > 0 else "yellow"
+    counts = (
+        f"[{gpu_color}]GPU {gpu_free}/{stats.gpu_total} free[/]  "
+        f"[dim]CPU {cpu_free}/{stats.cpu_total} free · RAM {mem_free_gb:.0f}GB free[/]"
+    )
+
+    if gpu_free > 0:
+        verdict = "[bold green]✓ OK to submit a GPU job now[/]"
+    elif cpu_free > 0 and mem_free_gb > 0:
+        verdict = "[bold yellow]⚠ GPU busy — CPU-only jobs can still run[/]"
+    else:
+        verdict = "[bold red]✗ Cluster full — wait for a job to finish[/]"
+
+    return f"{counts}  [dim]·[/]  {verdict}"
+
+
+def _build_status_line(jobs, stats, username: str, spin: str) -> Panel:
+    """Single-line status panel: user · all running jobs (any user) · free resources + submit verdict."""
     user_seg = f"[bold cyan]User:[/] [bold white]{username}[/]"
 
     if jobs is None:
         job_seg = "[dim]fetching…[/]"
-        gpu_seg = ""
     else:
         running = [j for j in jobs if j.state == "RUNNING"]
         if running:
@@ -98,15 +128,12 @@ def _build_status_line(jobs, username: str, spin: str) -> Panel:
             if len(running) > 4:
                 parts.append(f"[dim]+{len(running) - 4} more[/]")
             job_seg = "  ".join(parts)
-            gpu_seg = "  [dim]·[/]  [yellow]GPU: Allocated[/]"
         else:
-            job_seg = ""
-            gpu_seg = "[bold green]GPU is available[/]"
+            job_seg = "[dim]no jobs running[/]"
 
-    if job_seg:
-        line = f"  {user_seg}  [dim]·[/]  {job_seg}{gpu_seg}"
-    else:
-        line = f"  {user_seg}  [dim]·[/]  {gpu_seg}"
+    res_seg = _resource_seg(stats)
+
+    line = f"  {user_seg}  [dim]·[/]  {job_seg}  [dim]·[/]  {res_seg}"
     return Panel(
         line,
         title=f"[bold] {spin} Cluster Status  ·  any key to continue [/bold]",
@@ -125,17 +152,22 @@ def show_status_block() -> None:
     except Exception:
         username = "?"
 
-    from iitgpu.slurm import queue as _queue
+    from iitgpu.slurm import queue as _queue, get_node_stats as _get_node_stats
 
     jobs: list | None = None
+    stats = None
     last_refresh = 0.0
 
     def _refresh() -> None:
-        nonlocal jobs, last_refresh
+        nonlocal jobs, stats, last_refresh
         try:
             jobs = _queue(all_users=True)
         except Exception:
             jobs = []
+        try:
+            stats = _get_node_stats()
+        except Exception:
+            stats = None
         last_refresh = time.monotonic()
 
     _refresh()
@@ -156,7 +188,7 @@ def show_status_block() -> None:
         with Live(console=console, auto_refresh=False, screen=False) as live:
             while time.monotonic() < deadline:
                 spin = _SPINNERS[int(time.monotonic() * 4) % len(_SPINNERS)]
-                live.update(_build_status_line(jobs, username, spin))
+                live.update(_build_status_line(jobs, stats, username, spin))
                 live.refresh()
 
                 if _HAS_TERMIOS:
