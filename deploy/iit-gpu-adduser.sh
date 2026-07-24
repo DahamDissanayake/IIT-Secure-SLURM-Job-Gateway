@@ -123,8 +123,8 @@ ok "SLURM: $USERNAME → account=$SLURM_ACCOUNT qos=$SLURM_QOS"
 # in gpuusers, so a group-readable mode would not help them anyway.
 step "Creating $NFS_ROOT/users/$USERNAME on the NFS server (GPU host) ..."
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
-    sudo chown $NEW_UID:$NEW_UID $NFS_ROOT/users/$USERNAME && \
-    sudo chmod 0700 $NFS_ROOT/users/$USERNAME\""
+    sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/users/$USERNAME && \
+    sudo chmod 2770 $NFS_ROOT/users/$USERNAME\""
 
 # Shell users get ~/shared → NFS root so they can reach datasets, models, envs,
 # AND their private area at ~/shared/users/<user> in one place.

@@ -99,3 +99,16 @@ def test_adduser_enforces_home_ownership_both_nodes():
     assert "sudo chown -R $NEW_UID:$NEW_UID /home/$USERNAME" in text
     # verify step asserts ownership matches
     assert "expected $luid" in text and "expected $ruid" in text
+
+
+def test_adduser_creates_user_area_owner_and_admin_only():
+    """New user areas must be 2770 group admin, not 0700 owner-only.
+
+    0700 locks admins out; anything looser exposes the area to other users.
+    """
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[1] / "deploy" / "iit-gpu-adduser.sh"
+    text = script.read_text()
+    assert "chmod 2770" in text, "user area must be mode 2770"
+    assert "chmod 0700" not in text, "0700 would lock admins out of user areas"
+    assert "$ADMIN_GROUP" in text, "group must come from ADMIN_GROUP, not hardcoded"
