@@ -169,3 +169,36 @@ def test_jobspec_task_type_can_be_set():
     spec = _spec(task_type="train")
     assert spec.task_type == "train"
 
+
+
+def _folder_spec():
+    from iitgpu.jobs import JobSpec
+    return JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=1,
+                   mem_gb=1, time_limit="", run_command="", user="tester")
+
+
+def test_job_folder_is_owner_and_admin_only(tmp_path):
+    """Other users must not reach a job folder: it holds the user's scripts."""
+    import os
+    from iitgpu.jobs import make_job_folder
+    folder = make_job_folder(str(tmp_path), _folder_spec())
+    assert os.stat(folder).st_mode & 0o7777 == 0o2770
+
+
+def test_job_folder_group_is_the_admin_group(tmp_path, monkeypatch):
+    """Group must be the admin group so admins can support users' jobs."""
+    import iitgpu.jobs as J
+    seen = {}
+
+    class _Grp:
+        gr_gid = 4242
+
+    def _fake_getgrnam(name):
+        seen["group"] = name
+        return _Grp
+
+    monkeypatch.setattr(J.grp, "getgrnam", _fake_getgrnam)
+    monkeypatch.setattr(J.os, "chown", lambda p, uid, gid: seen.__setitem__("gid", gid))
+    make_job_folder(str(tmp_path), _folder_spec())
+    assert seen["group"] == "gpuadmins"
+    assert seen["gid"] == 4242

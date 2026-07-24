@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 # ── Job directory permissions ─────────────────────────────────────────────────
 
-def test_make_job_folder_uses_0o770(tmp_path):
+def test_make_job_folder_uses_0o2770(tmp_path):
     from iitgpu.jobs import JobSpec, make_job_folder
 
     spec = JobSpec(
@@ -25,8 +25,8 @@ def test_make_job_folder_uses_0o770(tmp_path):
     folder = make_job_folder(str(tmp_path), spec)
     st = Path(folder).stat()
     mode = stat.S_IMODE(st.st_mode)
-    # Must be 0o770 (rwxrwx---): no world permissions
-    assert mode == 0o770, (
+    # Must be 0o2770 (rwxrwx--- + setgid): no world permissions, group inherited
+    assert mode == 0o2770, (
         f"Job folder has mode {oct(mode)} — expected 0o770 (rwxrwx---). "
         "Other users should not be able to read each other's job output."
     )
@@ -143,7 +143,7 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
         folder = make_job_folder(str(tmp_path), spec)
 
     assert Path(folder).is_dir(), "folder must be created even if chown fails"
-    assert stat.S_IMODE(Path(folder).stat().st_mode) == 0o770
+    assert stat.S_IMODE(Path(folder).stat().st_mode) == 0o2770
 
 
 # ── Gateway ForceCommand wrapper ──────────────────────────────────────────────

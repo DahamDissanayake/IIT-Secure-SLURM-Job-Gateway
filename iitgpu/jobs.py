@@ -108,13 +108,17 @@ def make_job_folder(jobs_dir: str, spec: JobSpec) -> str:
     timestamp = datetime.now(_cluster_tz()).strftime("%Y%m%d_%H%M%S")
     folder = Path(jobs_dir) / spec.user / f"{spec.job_name}_{timestamp}"
     folder.mkdir(parents=True, exist_ok=True)
-    # 0o770: owner + gpuusers group can read/write; other users cannot
-    # Set group to gpuusers so daham (the sudo-sbatch user) can open the script.
-    # Non-root can chown group to any group they belong to; public is in gpuusers.
-    folder.chmod(0o770)
+    # 2770: owner + admin group only. A job folder holds the user's scripts and
+    # output — the same private content as their home — so other users get
+    # nothing. setgid keeps the group on anything created inside, so admin
+    # access still works for files written later by the job itself.
+    folder.chmod(0o2770)
     try:
         from iitgpu.config import load_config
-        gid = grp.getgrnam(load_config().gpuusers_group).gr_gid
+        # Previously group gpuusers, so a shared submit account could read the
+        # script under gateway_shared_user mode. That mode is off here
+        # (shared_user_mode=False); if it's ever enabled this needs revisiting.
+        gid = grp.getgrnam(load_config().admin_group).gr_gid
         os.chown(str(folder), -1, gid)
     except (KeyError, PermissionError, OSError):
         pass   # best-effort; sbatch will fail with a clear error if still blocked
