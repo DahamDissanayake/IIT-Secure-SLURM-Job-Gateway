@@ -116,11 +116,12 @@ step "Registering SLURM association ..."
 run "sacctmgr -i add user $USERNAME account=$SLURM_ACCOUNT qos=$SLURM_QOS 2>/dev/null || true"
 ok "SLURM: $USERNAME → account=$SLURM_ACCOUNT qos=$SLURM_QOS"
 
-# ── 5. Shared workspace (private 0700) + ~/shared convenience symlink ──────────
+# ── 5. Shared workspace (owner + admins, 2770) + ~/shared convenience symlink ──
 # Create + chown ON THE GPU HOST: it is the NFS server, so root is real there.
 # With root_squash on the export, an admin chown over NFS from the login node
-# would be squashed to nobody and fail. Shell users get 0700 too — they are not
-# in gpuusers, so a group-readable mode would not help them anyway.
+# would be squashed to nobody and fail. Mode 2770 group $ADMIN_GROUP means the
+# owner and admins can reach the area and nobody else can; setgid keeps that
+# group on anything created inside. Shell users get the same treatment.
 step "Creating $NFS_ROOT/users/$USERNAME on the NFS server (GPU host) ..."
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/users/$USERNAME && \
