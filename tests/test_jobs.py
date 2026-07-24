@@ -114,14 +114,14 @@ def test_resource_defaults_train():
 def test_resource_defaults_inference():
     d = resource_defaults("inference")
     assert d.cpus == 8
-    assert d.mem_gb == 32
+    assert d.mem_gb == 14
     assert d.time_limit == "04:00:00"
 
 
 def test_resource_defaults_test():
     d = resource_defaults("test")
     assert d.cpus == 4
-    assert d.mem_gb == 16
+    assert d.mem_gb == 8
     assert d.time_limit == "00:30:00"
 
 

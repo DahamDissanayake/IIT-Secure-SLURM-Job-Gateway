@@ -112,3 +112,39 @@ def test_shard_request_beyond_capacity_is_rejected(monkeypatch):
         assert any("slices" in e for e in errors), errors
     finally:
         importlib.reload(v)
+
+
+# ── Slice sizing ──────────────────────────────────────────────────────────────
+#
+# Splitting the GPU is not enough on its own: if a one-slice job still asks for
+# a third of the node's RAM, memory becomes the new bottleneck and the second
+# notebook queues on "Resources" with the GPU almost idle. This is the bug that
+# survived the first sharding attempt, so it is pinned here.
+
+NODE_CPUS = 32
+NODE_MEM_GB = 60      # RealMemory=62000 MB
+
+
+@pytest.mark.parametrize("task", ["notebook", "interactive", "inference"])
+def test_a_full_cards_worth_of_slice_jobs_fits_on_the_node(task):
+    d = resource_defaults(task)
+    concurrent = SHARDS_PER_GPU // d.gpu_shards
+    assert d.cpus * concurrent <= NODE_CPUS, (
+        f"{concurrent}x {task} needs {d.cpus * concurrent} CPUs, node has {NODE_CPUS}")
+    assert d.mem_gb * concurrent <= NODE_MEM_GB, (
+        f"{concurrent}x {task} needs {d.mem_gb * concurrent} GB RAM, "
+        f"node has {NODE_MEM_GB}")
+
+
+def test_two_notebooks_fit_side_by_side():
+    """The originally reported failure: a second JupyterLab could not start."""
+    d = resource_defaults("notebook")
+    assert d.gpu_shards * 2 <= SHARDS_PER_GPU
+    assert d.cpus * 2 <= NODE_CPUS
+    assert d.mem_gb * 2 <= NODE_MEM_GB
+
+
+def test_whole_card_tasks_still_fit_on_the_node():
+    for task in ("train", "finetune", "custom"):
+        d = resource_defaults(task)
+        assert d.cpus <= NODE_CPUS and d.mem_gb <= NODE_MEM_GB, task

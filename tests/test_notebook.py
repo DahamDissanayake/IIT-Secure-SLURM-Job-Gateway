@@ -16,7 +16,7 @@ def test_notebook_defaults_correct():
     d = resource_defaults("notebook")
     assert d.gpu_shards == 1
     assert d.cpus == 8
-    assert d.mem_gb == 32
+    assert d.mem_gb == 14
     assert d.time_limit == "08:00:00"
 
 

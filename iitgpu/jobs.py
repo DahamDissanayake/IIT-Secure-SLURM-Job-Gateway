@@ -38,15 +38,26 @@ class TaskDefaults:
 # Interactive/light work takes one slice so several users fit on the card at
 # once; training-shaped work still takes the whole GPU because it wants all the
 # VRAM. Shards are a *scheduling* split, not a VRAM cap — see gpu_share_note().
+#
+# CPU and RAM must be sized to match the split, or they become the new
+# bottleneck: a one-slice job asking for 32G RAM still blocks a second one on a
+# 60G node, and the GPU sits mostly idle exactly as it did before sharding.
+# A single-slice job therefore gets about a quarter of the node.
+_SLICE_CPUS = 8    # 32 cores / 4 slices
+_SLICE_MEM_GB = 14  # ~60 GiB / 4 slices, with headroom so four really fit
+
 TASK_DEFAULTS: dict[str, TaskDefaults] = {
     "train":     TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
     "finetune":  TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
-    "inference": TaskDefaults(gpu_shards=1, cpus=8,  mem_gb=32, time_limit="04:00:00"),
-    "test":      TaskDefaults(gpu_shards=1, cpus=4,  mem_gb=16, time_limit="00:30:00"),
-    "notebook":  TaskDefaults(gpu_shards=1, cpus=8,  mem_gb=32, time_limit="08:00:00"),
+    "inference": TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
+                              time_limit="04:00:00"),
+    "test":      TaskDefaults(gpu_shards=1, cpus=4, mem_gb=8, time_limit="00:30:00"),
+    "notebook":  TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
+                              time_limit="08:00:00"),
     # An interactive shell mostly sits idle at a prompt — one slice, so it never
     # parks on the whole card while someone reads their scrollback.
-    "interactive": TaskDefaults(gpu_shards=1, cpus=8, mem_gb=32, time_limit="02:00:00"),
+    "interactive": TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
+                                time_limit="02:00:00"),
     "custom":    TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
 }
 
