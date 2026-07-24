@@ -114,6 +114,6 @@ def launch_tensorboard() -> None:
         ok(f"TensorBoard submitted! Job {res}")
         info(f"TensorBoard binds to the compute node IP (resolved at runtime).")
         info(f"Exact tunnel command is printed in job output — shape: ")
-        info(f"  ssh -p {cfg.gateway_port} -L {port}:<node-ip>:{port} {getpass.getuser()}@{cfg.gateway_host}")
+        info(f"  ssh -p {cfg.gateway_port} -L <port>:<node-ip>:<port> {getpass.getuser()}@{cfg.gateway_host}")
     else:
         err(f"Submission failed: {res}")

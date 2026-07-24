@@ -913,7 +913,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             info("JupyterLab binds to the compute node's internal IP (resolved at runtime).")
             info("The exact SSH tunnel command is printed in the job's output once it starts:")
             info(f"  squeue --job {result}   (check state)  |  look at the job log for the tunnel line")
-            info(f"  Tunnel shape:  ssh -p {cfg.gateway_port} -L {nb_port}:<node-ip>:{nb_port} {user}@{cfg.gateway_host}")
+            info(f"  Tunnel shape:  ssh -p {cfg.gateway_port} -L <port>:<node-ip>:<port> {user}@{cfg.gateway_host}")
             auditclient.log("notebook_submitted_ok", detail=job_name, job_id=result)
             if questionary.confirm(
                 "Watch job output now for the tunnel command?", default=True, style=_STYLE

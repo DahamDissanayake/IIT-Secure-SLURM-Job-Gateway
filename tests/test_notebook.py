@@ -46,7 +46,7 @@ def test_notebook_sbatch_has_jupyter_launch(tmp_path):
     assert "jupyter lab" in script
     assert "--no-browser" in script
     assert "--ip=$IIT_NODE_ADDR" in script
-    assert "--port=8888" in script
+    assert "--port=$IIT_PORT --port-retries=0" in script
 
 
 def test_notebook_sbatch_binds_to_node_addr_not_loopback(tmp_path):
@@ -65,7 +65,7 @@ def test_notebook_sbatch_binds_to_node_addr_not_loopback(tmp_path):
     # … binds the server to it …
     assert "--ip=$IIT_NODE_ADDR" in script
     # … and the tunnel forwards to that address, not localhost.
-    assert "-L 8888:$IIT_NODE_ADDR:8888" in script
+    assert "-L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT" in script
     # Never exposed on all interfaces (public network).
     assert "0.0.0.0" not in script
 
@@ -116,7 +116,7 @@ def test_notebook_sbatch_custom_port(tmp_path):
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=9000)
-    assert "--port=9000" in script
+    assert "base = 9000" in script
     assert "9000" in script   # also appears in tunnel hint
 
 
@@ -214,7 +214,7 @@ def test_notebook_sbatch_prints_full_lab_url_with_token(tmp_path):
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888)
     assert "/lab?token=$JUPYTER_TOKEN" in script
-    assert "http://127.0.0.1:8888/lab?token=$JUPYTER_TOKEN" in script
+    assert "http://127.0.0.1:$IIT_PORT/lab?token=$JUPYTER_TOKEN" in script
 
 
 def test_notebook_sbatch_uses_identity_provider_token(tmp_path):

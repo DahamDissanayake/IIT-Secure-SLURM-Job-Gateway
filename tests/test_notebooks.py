@@ -20,7 +20,7 @@ def test_tensorboard_sbatch_has_launch_and_tunnel(tmp_path):
     assert "tensorboard --logdir /shared/u/logs" in s
     assert "--host $IIT_NODE_ADDR" in s
     assert "ssh -p 2225" in s
-    assert "-L 6006:$IIT_NODE_ADDR:6006" in s
+    assert "-L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT" in s
     assert "6006" in s
 
 

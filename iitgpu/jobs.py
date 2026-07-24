@@ -279,6 +279,44 @@ _NODE_ADDR_SNIPPET = [
 ]
 
 
+# Bash that resolves a free TCP port into $IIT_PORT before anything is printed.
+#
+# The GPU is shared, so several notebooks/TensorBoards now run at once — and a
+# fixed port collides. JupyterLab reacts by silently moving to the next free
+# port ("The port 8888 is already in use, trying another port") while the tunnel
+# instructions printed above it still name the ORIGINAL port. The user then
+# forwards to a port nothing is listening on and the notebook looks broken.
+#
+# So the port must be chosen *before* the instructions are written, and the
+# service pinned to it. Each job starts scanning from an offset derived from its
+# job ID, so two jobs starting at the same moment rarely probe the same port;
+# the scan then wraps to cover the whole range.
+def _free_port_snippet(base_port: int) -> list[str]:
+    # Quoted heredoc ('PYEOF') so the shell expands nothing inside the Python.
+    return [
+        "IIT_PORT=$(python3 <<'PYEOF'",
+        "import os, socket, sys",
+        f"base = {base_port}",
+        'start = base + (int(os.environ.get("SLURM_JOB_ID", "0")) % 50)',
+        "for p in list(range(start, base + 100)) + list(range(base, start)):",
+        "    s = socket.socket()",
+        "    try:",
+        '        s.bind(("", p))',
+        "    except OSError:",
+        "        continue",
+        "    finally:",
+        "        s.close()",
+        "    print(p)",
+        "    break",
+        "else:",
+        "    sys.exit(1)",
+        "PYEOF",
+        ")",
+        '[ -z "$IIT_PORT" ] && { echo "ERROR: no free port on this node — try again." >&2; exit 1; }',
+        "",
+    ]
+
+
 def render_notebook_sbatch(
     spec: "JobSpec",
     folder: str,
@@ -328,7 +366,7 @@ def render_notebook_sbatch(
         # Notebook inside container — wrap the entire jupyter launch
         launcher = (
             f"apptainer exec --nv --bind /shared {spec.container_image} "
-            f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port={port} "
+            f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port=$IIT_PORT --port-retries=0 "
             f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
     else:
@@ -367,11 +405,11 @@ def render_notebook_sbatch(
             lines.append("")
 
         launcher = (
-            f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port={port} "
+            f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port=$IIT_PORT --port-retries=0 "
             f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
 
-    lines += _NODE_ADDR_SNIPPET
+    lines += _NODE_ADDR_SNIPPET + _free_port_snippet(port)
     lines += [
         "# Generate a random per-job token (not logged beyond this script's stdout)",
         'JUPYTER_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(24))")',
@@ -380,9 +418,9 @@ def render_notebook_sbatch(
         "echo 'JupyterLab is starting on the GPU node.'",
         'echo "Token: $JUPYTER_TOKEN"',
         "echo 'SSH tunnel — open a NEW terminal on YOUR LAPTOP and run:'",
-        f'echo "  ssh -p {gateway_port} -N -L {port}:$IIT_NODE_ADDR:{port} $USER@{gateway_host}"',
+        f'echo "  ssh -p {gateway_port} -N -L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT $USER@{gateway_host}"',
         "echo '  (-N = tunnel only, no shell opens — terminal sitting idle is correct)'",
-        f'echo "Then open in browser: http://127.0.0.1:{port}/lab?token=$JUPYTER_TOKEN"',
+        f'echo "Then open in browser: http://127.0.0.1:$IIT_PORT/lab?token=$JUPYTER_TOKEN"',
         "echo '================================================='",
         "",
         launcher,
@@ -429,7 +467,7 @@ def render_tensorboard_sbatch(spec, folder, logdir, port=6006,
     if spec.container_image:
         launcher = (
             f"apptainer exec --bind /shared {spec.container_image} "
-            f"tensorboard --logdir {logdir} --port {port} --host $IIT_NODE_ADDR"
+            f"tensorboard --logdir {logdir} --port $IIT_PORT --host $IIT_NODE_ADDR"
         )
     else:
         if spec.conda_env:
@@ -439,15 +477,15 @@ def render_tensorboard_sbatch(spec, folder, logdir, port=6006,
                 f"conda activate {spec.conda_env}",
                 "",
             ]
-        launcher = f"tensorboard --logdir {logdir} --port {port} --host $IIT_NODE_ADDR"
-    lines += _NODE_ADDR_SNIPPET
+        launcher = f"tensorboard --logdir {logdir} --port $IIT_PORT --host $IIT_NODE_ADDR"
+    lines += _NODE_ADDR_SNIPPET + _free_port_snippet(port)
     lines += [
         "echo \'=================================================\'",
         "echo \'TensorBoard starting.\'",
         "echo \'SSH tunnel — open a NEW terminal on YOUR LAPTOP and run:\'",
-        f'echo "  ssh -p {gateway_port} -N -L {port}:$IIT_NODE_ADDR:{port} $USER@{gateway_host}"',
+        f'echo "  ssh -p {gateway_port} -N -L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT $USER@{gateway_host}"',
         "echo \'  (-N = tunnel only, no shell opens — terminal sitting idle is correct)\'",
-        f"echo \'Then open: http://127.0.0.1:{port}\'",
+        f'echo "Then open: http://127.0.0.1:$IIT_PORT"',
         "echo \'=================================================\'",
         "",
         launcher,
