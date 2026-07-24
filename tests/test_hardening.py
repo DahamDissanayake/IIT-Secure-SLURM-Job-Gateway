@@ -27,7 +27,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
     mode = stat.S_IMODE(st.st_mode)
     # Must be 0o2770 (rwxrwx--- + setgid): no world permissions, group inherited
     assert mode == 0o2770, (
-        f"Job folder has mode {oct(mode)} — expected 0o770 (rwxrwx---). "
+        f"Job folder has mode {oct(mode)} — expected 0o2770 (rwxrwx--- + setgid). "
         "Other users should not be able to read each other's job output."
     )
 

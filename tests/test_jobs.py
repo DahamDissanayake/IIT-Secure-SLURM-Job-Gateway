@@ -185,13 +185,25 @@ def test_job_folder_is_owner_and_admin_only(tmp_path):
     assert os.stat(folder).st_mode & 0o7777 == 0o2770
 
 
-def test_job_folder_group_is_the_admin_group(tmp_path, monkeypatch):
-    """Group must be the admin group so admins can support users' jobs."""
+def test_job_folder_group_comes_from_config_not_a_hardcoded_name(tmp_path, monkeypatch):
+    """The group must be read from config.admin_group.
+
+    Asserting the default name would pass even if the implementation hardcoded
+    grp.getgrnam("gpuadmins"), so point config at a distinctive value and prove
+    that value is what reaches getgrnam.
+    """
+    from dataclasses import replace
+    import iitgpu.config as C
     import iitgpu.jobs as J
+
     seen = {}
 
     class _Grp:
         gr_gid = 4242
+
+    _real_load = C.load_config
+    monkeypatch.setattr(C, "load_config",
+                        lambda: replace(_real_load(), admin_group="sentinel-admins"))
 
     def _fake_getgrnam(name):
         seen["group"] = name
@@ -199,6 +211,8 @@ def test_job_folder_group_is_the_admin_group(tmp_path, monkeypatch):
 
     monkeypatch.setattr(J.grp, "getgrnam", _fake_getgrnam)
     monkeypatch.setattr(J.os, "chown", lambda p, uid, gid: seen.__setitem__("gid", gid))
+
     make_job_folder(str(tmp_path), _folder_spec())
-    assert seen["group"] == "gpuadmins"
+
+    assert seen["group"] == "sentinel-admins", "group name must come from config"
     assert seen["gid"] == 4242
