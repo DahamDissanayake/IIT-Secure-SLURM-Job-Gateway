@@ -107,30 +107,46 @@ class JobSpec:
 def make_job_folder(jobs_dir: str, spec: JobSpec) -> str:
     timestamp = datetime.now(_cluster_tz()).strftime("%Y%m%d_%H%M%S")
     folder = Path(jobs_dir) / spec.user / f"{spec.job_name}_{timestamp}"
-    # 2770: owner + admin group only. A job folder holds the user's scripts and
-    # output — the same private content as their home — so other users get
-    # nothing.
+    # Owner + admin group only, no world access. A job folder holds the
+    # user's scripts and output — the same private content as their home —
+    # so other users get nothing.
     #
-    # Getting there is NOT a chmod(0o2770) after mkdir. POSIX chmod() silently
-    # clears S_ISGID whenever the caller is not privileged and not a member of
-    # the file's *current* group. Right after mkdir() under the setgid,
-    # gpuadmins-owned jobs/<user> parent (provisioned 2770 by
-    # deploy/iit-gpu-adduser.sh — see UPGRADE-RUNBOOK Finding 1), the new
-    # folder's group is ALREADY gpuadmins by kernel inheritance from that
-    # setgid parent — and a regular submitting user is never a member of
-    # gpuadmins. So a trailing chmod(0o2770) here doesn't "keep" setgid, it
-    # strips the one that inheritance just gave us (verified live as a
-    # non-admin: os.chmod(dir, 0o2770) turned an inherited "drwxrws---" into
-    # plain "drwxrwx---", no error raised — see final-fix-report.md Finding 4).
+    # How "other" is kept out: force a 0o007 umask around mkdir. That strips
+    # "other" access on every directory it creates (the leaf, and any
+    # missing intermediate dirs), yielding 0770 with no privilege required.
+    # This part is unchanged and still correct.
     #
-    # So: never chmod for setgid. Force a 0o007 umask around mkdir instead —
-    # that strips "other" access on every directory it creates (the leaf, and
-    # any missing intermediate dirs) without touching the setgid bit at all,
-    # which mkdir's mode argument doesn't control anyway; setgid comes purely
-    # from the parent. Under a setgid gpuadmins parent this yields 2770 with
-    # no privilege required. Absent a setgid parent (e.g. a plain tmp dir in a
-    # unit test) it yields a safe 770 with no setgid — a lesser but still
-    # private outcome, not a security hole.
+    # How admin access actually works — this is NOT setgid/group inheritance.
+    # An earlier version of this comment claimed the folder inherits setgid
+    # (and group gpuadmins) by kernel inheritance from the setgid jobs/<user>
+    # parent, the way it would on a normal local filesystem (e.g. /tmp). That
+    # is false on this NFS share: verified live that setgid does NOT
+    # propagate here — the identical mkdir, same non-admin user, under a
+    # 2770 parent yields a 2770 child on /tmp but a 5770 or 1770 child (no
+    # setgid bit at all) on /shared. So this folder cannot be relied on to
+    # come out group-gpuadmins either; without setgid, mkdir gives it the
+    # calling process's own primary group, not the parent's.
+    #
+    # What actually grants gpuadmins access here is a *default ACL* on the
+    # jobs/<user> parent directory: deploy/fix-shared-perms.sh (existing
+    # areas) and deploy/iit-gpu-adduser.sh (new areas) both run
+    # `setfacl -m d:g:$ADMIN_GROUP:rwx` on jobs/<user>. Unlike setgid,
+    # default ACLs ARE inherited on this filesystem — anything created
+    # underneath, including this timestamped job folder, automatically picks
+    # up an access ACL entry granting gpuadmins rwx, regardless of what its
+    # traditional owner/group/mode bits say. `stat` won't show this; check
+    # with `getfacl` on the GPU host (the NFS server — see
+    # deploy/check-shared-perms.sh).
+    #
+    # We still never chmod(0o2770) here to "add" setgid: POSIX chmod()
+    # silently clears S_ISGID whenever the caller isn't privileged or a
+    # member of the file's current group, so a trailing chmod would only
+    # destroy real setgid if it were ever present, for zero benefit — the
+    # ACL inheritance above does not depend on setgid or group ownership at
+    # all. The umask trick still can't grant setgid; absent a setgid
+    # ancestor (e.g. a plain tmp dir in a unit test) mkdir just yields a
+    # safe 770 with no setgid — a lesser but still private outcome, not a
+    # security hole.
     prev_umask = os.umask(0o007)
     try:
         folder.mkdir(parents=True, exist_ok=True)
@@ -138,11 +154,12 @@ def make_job_folder(jobs_dir: str, spec: JobSpec) -> str:
         os.umask(prev_umask)
     try:
         from iitgpu.config import load_config
-        # Best-effort: if the folder didn't already inherit gpuadmins (no
-        # setgid ancestor), try to set it explicitly. This still requires the
-        # caller to be a member of admin_group, which a regular submitting
-        # user is not — same limitation the old code had, just no longer
-        # paired with a chmod that destroys the setgid bit to get there.
+        # Best-effort: try to set the group explicitly too, as a second line
+        # of defense alongside the default-ACL inheritance above (e.g. useful
+        # off this NFS share, where setgid inheritance does apply normally).
+        # This still requires the caller to be a member of admin_group, which
+        # a regular submitting user is not, so it routinely no-ops for them —
+        # that's fine; admin access does not depend on it here.
         # Previously group gpuusers, so a shared submit account could read the
         # script under gateway_shared_user mode. That mode is off here
         # (shared_user_mode=False); if it's ever enabled this needs revisiting.
