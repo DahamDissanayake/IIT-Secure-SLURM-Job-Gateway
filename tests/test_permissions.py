@@ -1,10 +1,13 @@
 # tests/test_permissions.py
 """Shared-state files must be writable by every gateway user.
 
-The cluster's NFS export uses root_squash and supports neither ACLs nor setgid
-group inheritance, so group-based sharing can't be set up by the installer.
-Whoever creates a shared registry/template makes it world-writable (0666) so any
-other gpuusers member can update it in place. Regression for:
+The cluster's NFS export uses root_squash and does not inherit setgid group
+permissions. ACLs do work on /shared -- deploy/fix-shared-perms.sh and
+deploy/iit-gpu-adduser.sh apply a gpuadmins ACL to each user's own job/model
+directories -- but the installer has no equivalent per-file ACL step for
+shared registry/template files, so group-based sharing can't be set up for
+those. Whoever creates a shared registry/template makes it world-writable
+(0666) so any other gpuusers member can update it in place. Regression for:
 "Permission denied: '/shared/models/.registry.json'".
 """
 import os
