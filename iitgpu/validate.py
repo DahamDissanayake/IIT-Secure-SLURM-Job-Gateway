@@ -98,7 +98,7 @@ def clean_run_command(value: str) -> str:
 
 def user_browse_roots(nfs_root: str, username: str) -> list[str]:
     """Directories a regular user may navigate in the file manager.
-    Includes their own data dir plus the shared read-only areas."""
+    Their own area plus the shared read-only assets."""
     base = str(Path(nfs_root).resolve())
     return [
         str(Path(base) / "users" / username),
@@ -115,7 +115,13 @@ def user_upload_root(nfs_root: str, username: str) -> str:
 
 
 def in_user_browse_jail(path: str, nfs_root: str, username: str) -> bool:
-    """True when path is inside the user's browsable area (own dir + shared models/envs)."""
+    """True when path is inside the user's browsable area.
+
+    That is their own directory plus the shared read-only assets: models,
+    envs, data and datasets. Other users' areas and job folders are never
+    browsable, and the filesystem denies them independently (mode 2770,
+    group gpuadmins).
+    """
     try:
         real = str(Path(path).resolve())
     except (OSError, ValueError):
