@@ -207,8 +207,12 @@ def _wants_deps(ls: LaunchSpec) -> bool:
     return ls.intent == "notebook" or ls.script.endswith(".ipynb")
 
 
-def _edit_data_model(ls: LaunchSpec, browse_data, deps_prompt) -> None:
-    opts = ["data folder (browse)", "clear data", "model path (text)", "clear model"]
+def _edit_data_model(ls: LaunchSpec, cfg, browse_data, deps_prompt) -> None:
+    opts = [
+        "data folder (browse)", "clear data",
+        "model: pick from registry", "model: download from HuggingFace",
+        "model: enter a path or HF repo id", "clear model",
+    ]
     if _wants_deps(ls) and deps_prompt is not None:
         opts.append("python packages to pre-install")
     sel = questionary.select("Data / model:", choices=opts + ["back"]).ask()
@@ -218,13 +222,28 @@ def _edit_data_model(ls: LaunchSpec, browse_data, deps_prompt) -> None:
             ls.data_path = picked
     elif sel == "clear data":
         ls.data_path = ""
-    elif sel == "model path (text)":
+    elif sel == "model: pick from registry":
+        from iitgpu.models import pick_model
+        picked = pick_model(cfg)
+        if picked is not None:
+            ls.model_path = picked.path
+    elif sel == "model: download from HuggingFace":
+        repo_id = (questionary.text(
+            "HuggingFace repo ID (e.g. mistralai/Mistral-7B-v0.1):").ask() or "").strip()
+        if repo_id:
+            from iitgpu.models import download_hf
+            ok, dest = download_hf(cfg, repo_id)
+            if ok and dest:
+                ls.model_path = dest
+    elif sel == "model: enter a path or HF repo id":
         raw = (questionary.text("Model path (or HF repo id):").ask() or "").strip()
         if not raw:
             return
         # A local path is exported verbatim into the job script (MODEL_PATH /
         # HF_HOME), so it faces the jail; an HF repo id ("org/name") is not a
-        # path and passes through, exactly as the old wizard treated it.
+        # path and passes through, exactly as the old wizard treated it. The
+        # registry pick and HF download above are already-trusted paths and
+        # skip this check, matching the old wizard's options a/b/c split.
         if raw.startswith("/"):
             from iitgpu.validate import in_jail
             if not in_jail(raw):
@@ -339,7 +358,7 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
         elif sel == "Change environment":
             _edit_env(ls, cfg)
         elif sel == "Change data / model":
-            _edit_data_model(ls, browse_data, deps_prompt)
+            _edit_data_model(ls, cfg, browse_data, deps_prompt)
         elif sel == _PKG_CHOICE:
             ls.requirements, ls.packages = deps_prompt()
         elif sel == "Change args":

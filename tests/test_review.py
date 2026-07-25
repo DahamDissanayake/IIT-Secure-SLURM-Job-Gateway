@@ -208,7 +208,7 @@ def test_deps_option_offered_for_a_notebook_submitted_as_a_batch_job(monkeypatch
     ls = default_spec("batch")
     ls.script = "/shared/users/u/analysis.ipynb"
     seen = _captured_choices(monkeypatch, "Data / model")
-    R._edit_data_model(ls, lambda: None, lambda: ("", ""))
+    R._edit_data_model(ls, None, lambda: None, lambda: ("", ""))
 
     assert any("packages" in c for c in seen["choices"])
 
@@ -220,7 +220,7 @@ def test_deps_option_hidden_for_a_plain_script(monkeypatch):
     ls = default_spec("batch")
     ls.script = "/shared/users/u/train.py"
     seen = _captured_choices(monkeypatch, "Data / model")
-    R._edit_data_model(ls, lambda: None, lambda: ("", ""))
+    R._edit_data_model(ls, None, lambda: None, lambda: ("", ""))
 
     assert not any("packages" in c for c in seen["choices"])
 
@@ -230,7 +230,7 @@ def test_deps_option_offered_for_a_jupyterlab_session(monkeypatch):
     from iitgpu.launchspec import default_spec
 
     seen = _captured_choices(monkeypatch, "Data / model")
-    R._edit_data_model(default_spec("notebook"), lambda: None, lambda: ("", ""))
+    R._edit_data_model(default_spec("notebook"), None, lambda: None, lambda: ("", ""))
 
     assert any("packages" in c for c in seen["choices"])
 
@@ -479,9 +479,9 @@ def test_model_path_outside_the_jail_is_rejected(monkeypatch, capsys):
 
     ls = default_spec("batch")
     ls.model_path = "/shared/models/keepme"
-    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: enter a path or HF repo id"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("/etc/passwd"))
-    R._edit_data_model(ls, lambda: None, None)
+    R._edit_data_model(ls, None, lambda: None, None)
     assert ls.model_path == "/shared/models/keepme"
     assert "outside the allowed jail" in capsys.readouterr().out
 
@@ -490,9 +490,9 @@ def test_model_path_inside_the_jail_is_accepted(monkeypatch):
     import iitgpu.review as R
 
     ls = default_spec("batch")
-    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: enter a path or HF repo id"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("/shared/models/llama"))
-    R._edit_data_model(ls, lambda: None, None)
+    R._edit_data_model(ls, None, lambda: None, None)
     assert ls.model_path == "/shared/models/llama"
 
 
@@ -501,10 +501,70 @@ def test_model_path_accepts_a_hugging_face_repo_id(monkeypatch):
     import iitgpu.review as R
 
     ls = default_spec("batch")
-    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: enter a path or HF repo id"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("mistralai/Mistral-7B-v0.1"))
-    R._edit_data_model(ls, lambda: None, None)
+    R._edit_data_model(ls, None, lambda: None, None)
     assert ls.model_path == "mistralai/Mistral-7B-v0.1"
+
+
+def test_model_registry_pick_sets_the_model_path(monkeypatch):
+    """The registry option restores what the old wizard's option (a) did:
+    pick an already-downloaded model without retyping its path."""
+    import iitgpu.review as R
+    from iitgpu.models import ModelEntry
+
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: pick from registry"))
+    entry = ModelEntry(name="llama", source="huggingface",
+                       path="/shared/models/llama", added_at="2026-01-01",
+                       added_by="u", size_mb=1.0)
+    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: entry)
+    R._edit_data_model(ls, object(), lambda: None, None)
+    assert ls.model_path == "/shared/models/llama"
+
+
+def test_model_registry_pick_cancelled_leaves_model_path_unchanged(monkeypatch):
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+    ls.model_path = "/shared/models/keepme"
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: pick from registry"))
+    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: None)
+    R._edit_data_model(ls, object(), lambda: None, None)
+    assert ls.model_path == "/shared/models/keepme"
+
+
+def test_model_hf_download_sets_the_model_path_on_success(monkeypatch):
+    """Restores the old wizard's option (b): download from HuggingFace inline."""
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+
+    def _text(question, **kw):
+        return type("A", (), {"ask": lambda self: "mistralai/Mistral-7B-v0.1"})()
+
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: download from HuggingFace"))
+    monkeypatch.setattr(R.questionary, "text", _text)
+    monkeypatch.setattr("iitgpu.models.download_hf",
+                        lambda cfg, repo_id: (True, "/shared/models/Mistral-7B-v0.1"))
+    R._edit_data_model(ls, object(), lambda: None, None)
+    assert ls.model_path == "/shared/models/Mistral-7B-v0.1"
+
+
+def test_model_hf_download_failure_leaves_model_path_unchanged(monkeypatch):
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+    ls.model_path = "/shared/models/keepme"
+
+    def _text(question, **kw):
+        return type("A", (), {"ask": lambda self: "bad/repo"})()
+
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model: download from HuggingFace"))
+    monkeypatch.setattr(R.questionary, "text", _text)
+    monkeypatch.setattr("iitgpu.models.download_hf", lambda cfg, repo_id: (False, ""))
+    R._edit_data_model(ls, object(), lambda: None, None)
+    assert ls.model_path == "/shared/models/keepme"
 
 
 def test_container_image_must_be_a_jailed_sif(monkeypatch, capsys):
