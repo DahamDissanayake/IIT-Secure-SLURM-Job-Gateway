@@ -11,7 +11,17 @@ REPO_ROOT = Path(__file__).parent.parent
 # ── Job directory permissions ─────────────────────────────────────────────────
 
 def test_make_job_folder_uses_0o2770(tmp_path):
+    """In production, jobs/<user> is provisioned 2770 by iit-gpu-adduser.sh, so
+    the setgid bit reaches the job folder by kernel inheritance from that
+    parent -- not from a chmod inside make_job_folder (chmod cannot grant
+    setgid to a non-admin caller; see the comment on make_job_folder). Set up
+    that same setgid parent here rather than relying on an ambient umask/group
+    nobody configured, so this test proves the real mechanism."""
     from iitgpu.jobs import JobSpec, make_job_folder
+
+    user_dir = tmp_path / "sec_test"
+    user_dir.mkdir()
+    user_dir.chmod(0o2770)  # mimics jobs/<user> as provisioned in production
 
     spec = JobSpec(
         job_name="sec_test",
@@ -21,6 +31,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
         mem_gb=8,
         time_limit="00:30:00",
         run_command="echo hi",
+        user="sec_test",
     )
     folder = make_job_folder(str(tmp_path), spec)
     st = Path(folder).stat()
@@ -124,10 +135,20 @@ def test_make_job_folder_chowns_to_gpuusers(tmp_path):
 
 
 def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
-    """If os.chown fails (e.g. process not in gpuusers), make_job_folder
-    must not raise — it logs best-effort and returns the folder path."""
+    """If os.chown fails (e.g. process not in gpuadmins -- the normal case for
+    a regular submitting user), make_job_folder must not raise — it logs
+    best-effort and returns the folder path. This is also the realistic
+    production case: with a setgid gpuadmins parent (jobs/<user>, provisioned
+    by iit-gpu-adduser.sh), the folder already inherited group gpuadmins +
+    setgid from mkdir before os.chown is even attempted, so a PermissionError
+    here (the caller isn't in gpuadmins) must NOT cost the folder its already
+    -correct 2770 mode."""
     from unittest.mock import patch
     from iitgpu.jobs import JobSpec, make_job_folder
+
+    user_dir = tmp_path / "chown_fail"
+    user_dir.mkdir()
+    user_dir.chmod(0o2770)  # mimics jobs/<user> as provisioned in production
 
     spec = JobSpec(
         job_name="chown_fail",
@@ -137,13 +158,42 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
         mem_gb=8,
         time_limit="",
         run_command="echo hi",
+        user="chown_fail",
     )
 
     with patch("iitgpu.jobs.os.chown", side_effect=PermissionError("not in group")):
         folder = make_job_folder(str(tmp_path), spec)
 
     assert Path(folder).is_dir(), "folder must be created even if chown fails"
-    assert stat.S_IMODE(Path(folder).stat().st_mode) == 0o2770
+    assert stat.S_IMODE(Path(folder).stat().st_mode) == 0o2770, (
+        "setgid must survive a failed chown -- it came from mkdir inheriting "
+        "the setgid parent, not from chown or any chmod in make_job_folder"
+    )
+
+
+def test_make_job_folder_no_setgid_parent_still_gets_safe_permissions(tmp_path):
+    """Without a setgid ancestor (e.g. a plain tmp dir, unlike production's
+    jobs/<user>), make_job_folder cannot manufacture setgid out of nothing --
+    chmod() cannot grant it to a non-privileged, non-group-member caller. The
+    degraded result must still be safe (owner+group only, no world access),
+    just without the setgid bit."""
+    from iitgpu.jobs import JobSpec, make_job_folder
+
+    spec = JobSpec(
+        job_name="no_setgid_parent",
+        partition="gpu",
+        gpu_shards=1,
+        cpus=4,
+        mem_gb=8,
+        time_limit="",
+        run_command="echo hi",
+    )
+    folder = make_job_folder(str(tmp_path), spec)  # tmp_path is NOT setgid
+    mode = stat.S_IMODE(Path(folder).stat().st_mode)
+    assert mode == 0o770, (
+        f"Job folder has mode {oct(mode)} — expected 0o770 (no setgid parent "
+        "to inherit from, and chmod cannot safely add setgid here)."
+    )
 
 
 # ── Gateway ForceCommand wrapper ──────────────────────────────────────────────

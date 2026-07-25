@@ -107,14 +107,42 @@ class JobSpec:
 def make_job_folder(jobs_dir: str, spec: JobSpec) -> str:
     timestamp = datetime.now(_cluster_tz()).strftime("%Y%m%d_%H%M%S")
     folder = Path(jobs_dir) / spec.user / f"{spec.job_name}_{timestamp}"
-    folder.mkdir(parents=True, exist_ok=True)
     # 2770: owner + admin group only. A job folder holds the user's scripts and
     # output — the same private content as their home — so other users get
-    # nothing. setgid keeps the group on anything created inside, so admin
-    # access still works for files written later by the job itself.
-    folder.chmod(0o2770)
+    # nothing.
+    #
+    # Getting there is NOT a chmod(0o2770) after mkdir. POSIX chmod() silently
+    # clears S_ISGID whenever the caller is not privileged and not a member of
+    # the file's *current* group. Right after mkdir() under the setgid,
+    # gpuadmins-owned jobs/<user> parent (provisioned 2770 by
+    # deploy/iit-gpu-adduser.sh — see UPGRADE-RUNBOOK Finding 1), the new
+    # folder's group is ALREADY gpuadmins by kernel inheritance from that
+    # setgid parent — and a regular submitting user is never a member of
+    # gpuadmins. So a trailing chmod(0o2770) here doesn't "keep" setgid, it
+    # strips the one that inheritance just gave us (verified live as a
+    # non-admin: os.chmod(dir, 0o2770) turned an inherited "drwxrws---" into
+    # plain "drwxrwx---", no error raised — see final-fix-report.md Finding 4).
+    #
+    # So: never chmod for setgid. Force a 0o007 umask around mkdir instead —
+    # that strips "other" access on every directory it creates (the leaf, and
+    # any missing intermediate dirs) without touching the setgid bit at all,
+    # which mkdir's mode argument doesn't control anyway; setgid comes purely
+    # from the parent. Under a setgid gpuadmins parent this yields 2770 with
+    # no privilege required. Absent a setgid parent (e.g. a plain tmp dir in a
+    # unit test) it yields a safe 770 with no setgid — a lesser but still
+    # private outcome, not a security hole.
+    prev_umask = os.umask(0o007)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    finally:
+        os.umask(prev_umask)
     try:
         from iitgpu.config import load_config
+        # Best-effort: if the folder didn't already inherit gpuadmins (no
+        # setgid ancestor), try to set it explicitly. This still requires the
+        # caller to be a member of admin_group, which a regular submitting
+        # user is not — same limitation the old code had, just no longer
+        # paired with a chmod that destroys the setgid bit to get there.
         # Previously group gpuusers, so a shared submit account could read the
         # script under gateway_shared_user mode. That mode is off here
         # (shared_user_mode=False); if it's ever enabled this needs revisiting.

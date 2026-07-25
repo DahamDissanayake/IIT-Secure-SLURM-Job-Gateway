@@ -178,9 +178,18 @@ def _folder_spec():
 
 
 def test_job_folder_is_owner_and_admin_only(tmp_path):
-    """Other users must not reach a job folder: it holds the user's scripts."""
+    """Other users must not reach a job folder: it holds the user's scripts.
+
+    Production's jobs/<user> parent is provisioned 2770 by iit-gpu-adduser.sh
+    (setgid), and the folder gets its setgid bit by kernel inheritance from
+    that parent -- not from a chmod inside make_job_folder. Set up the same
+    setgid parent here so the assertion matches what production produces.
+    """
     import os
     from iitgpu.jobs import make_job_folder
+    user_dir = tmp_path / "tester"
+    user_dir.mkdir()
+    user_dir.chmod(0o2770)
     folder = make_job_folder(str(tmp_path), _folder_spec())
     assert os.stat(folder).st_mode & 0o7777 == 0o2770
 
