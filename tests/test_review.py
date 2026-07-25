@@ -471,3 +471,68 @@ def test_run_hub_passes_the_preview_through_to_advanced(monkeypatch):
     R.run_hub(ls, None, "u", browse_script=lambda: None,
               browse_data=lambda: None, preview=_preview)
     assert got["preview"] is _preview
+
+
+def test_model_path_outside_the_jail_is_rejected(monkeypatch, capsys):
+    """M1: the model path is exported verbatim into the job script."""
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+    ls.model_path = "/shared/models/keepme"
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("/etc/passwd"))
+    R._edit_data_model(ls, lambda: None, None)
+    assert ls.model_path == "/shared/models/keepme"
+    assert "outside the allowed jail" in capsys.readouterr().out
+
+
+def test_model_path_inside_the_jail_is_accepted(monkeypatch):
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("/shared/models/llama"))
+    R._edit_data_model(ls, lambda: None, None)
+    assert ls.model_path == "/shared/models/llama"
+
+
+def test_model_path_accepts_a_hugging_face_repo_id(monkeypatch):
+    """Not a path, so the jail does not apply — same as the old wizard."""
+    import iitgpu.review as R
+
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("model path (text)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("mistralai/Mistral-7B-v0.1"))
+    R._edit_data_model(ls, lambda: None, None)
+    assert ls.model_path == "mistralai/Mistral-7B-v0.1"
+
+
+def test_container_image_must_be_a_jailed_sif(monkeypatch, capsys):
+    """M1: the image path lands unquoted in the apptainer exec line."""
+    import iitgpu.review as R
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "is_dir", lambda self: False)   # no prebuilt envs
+    ls = default_spec("batch")
+    ls.env_kind, ls.conda_env = "prebuilt", "/shared/envs/data-science"
+    monkeypatch.setattr(R.questionary, "select", _Fixed("container image (.sif)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("/etc/evil.sif"))
+    R._edit_env(ls, cfg=None)
+    assert ls.container_image == ""
+    assert ls.conda_env == "/shared/envs/data-science"   # left untouched
+    assert ls.env_kind == "prebuilt"
+    assert "not a .sif" in capsys.readouterr().out
+
+
+def test_container_image_valid_sif_is_accepted(monkeypatch):
+    import iitgpu.review as R
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "is_dir", lambda self: False)
+    ls = default_spec("batch")
+    ls.env_kind, ls.conda_env = "prebuilt", "/shared/envs/data-science"
+    monkeypatch.setattr(R.questionary, "select", _Fixed("container image (.sif)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("/shared/images/torch.sif"))
+    R._edit_env(ls, cfg=None)
+    assert ls.container_image == "/shared/images/torch.sif"
+    assert ls.env_kind == "container" and ls.conda_env == ""

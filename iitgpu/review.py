@@ -172,21 +172,33 @@ def _edit_env(ls: LaunchSpec, cfg) -> None:
     sel = questionary.select("Environment:", choices=choices).ask()
     if sel is None:
         return
-    ls.conda_env = ls.venv_path = ls.container_image = ""
+
+    def _set(kind: str, *, conda: str = "", venv: str = "", image: str = "") -> None:
+        # Only ever clear the other three once a choice has actually produced a
+        # usable value — a rejected image must leave the environment as it was.
+        ls.env_kind = kind
+        ls.conda_env, ls.venv_path, ls.container_image = conda, venv, image
+
     if sel.startswith("prebuilt: "):
         name = sel.split(": ", 1)[1]
-        ls.env_kind, ls.conda_env = "prebuilt", str(envs_dir / name)
+        _set("prebuilt", conda=str(envs_dir / name))
     elif sel.startswith("own conda"):
-        ls.env_kind = "conda"
-        ls.conda_env = questionary.text("Conda env path:").ask() or ""
+        _set("conda", conda=questionary.text("Conda env path:").ask() or "")
     elif sel.startswith("own venv"):
-        ls.env_kind = "venv"
-        ls.venv_path = questionary.text("Venv path:").ask() or ""
+        _set("venv", venv=questionary.text("Venv path:").ask() or "")
     elif sel.startswith("container"):
-        ls.env_kind = "container"
-        ls.container_image = questionary.text("Full path to .sif image:").ask() or ""
+        # The image path lands unquoted in the generated `apptainer exec` line,
+        # so it gets the same check the old wizard applied: inside the jail and
+        # actually a .sif.
+        from iitgpu.containers import validate_image
+        raw = (questionary.text("Full path to .sif image:").ask() or "").strip()
+        if not validate_image(raw):
+            warn("Image path is outside the allowed jail or not a .sif — "
+                 "keeping the current environment.")
+            return
+        _set("container", image=raw)
     else:
-        ls.env_kind = "none"
+        _set("none")
 
 
 def _wants_deps(ls: LaunchSpec) -> bool:
@@ -207,7 +219,18 @@ def _edit_data_model(ls: LaunchSpec, browse_data, deps_prompt) -> None:
     elif sel == "clear data":
         ls.data_path = ""
     elif sel == "model path (text)":
-        ls.model_path = questionary.text("Model path (or HF repo id):").ask() or ls.model_path
+        raw = (questionary.text("Model path (or HF repo id):").ask() or "").strip()
+        if not raw:
+            return
+        # A local path is exported verbatim into the job script (MODEL_PATH /
+        # HF_HOME), so it faces the jail; an HF repo id ("org/name") is not a
+        # path and passes through, exactly as the old wizard treated it.
+        if raw.startswith("/"):
+            from iitgpu.validate import in_jail
+            if not in_jail(raw):
+                warn("Path is outside the allowed jail — keeping the current model.")
+                return
+        ls.model_path = raw
     elif sel == "clear model":
         ls.model_path = ""
     elif sel == "python packages to pre-install":
