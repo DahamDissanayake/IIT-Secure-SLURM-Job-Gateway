@@ -729,3 +729,47 @@ def test_build_layout_admin_tag_visible_in_footer():
     import re
     plain = re.sub(r'\x1b\[[0-9;]*m', '', rendered)
     assert "(admin)" in plain
+
+
+# ── STARTING state + Connect key ─────────────────────────────────────────────
+
+def test_jupyter_job_without_marker_shows_starting(tmp_path):
+    """RUNNING is a scheduler fact, not a usability fact. Until .iit-ready
+    exists the user cannot connect, so the table must say STARTING."""
+    import re as _re
+    from rich.console import Console
+    from iitgpu.dashboard import _build_jobs_table
+    from iitgpu.slurm import QueueEntry
+
+    j = QueueEntry("21", "notebook", "RUNNING", "gpu", "0:10", 1,
+                   user="alice", time_limit="6:00:00")
+    table = _build_jobs_table([j], 0, "alice", jupyter_ready={"21": False})
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(table)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "STARTING" in plain and "RUNNING" not in plain
+
+
+def test_jupyter_job_with_marker_shows_running(tmp_path):
+    import re as _re
+    from rich.console import Console
+    from iitgpu.dashboard import _build_jobs_table
+    from iitgpu.slurm import QueueEntry
+
+    j = QueueEntry("22", "notebook", "RUNNING", "gpu", "0:10", 1, user="alice")
+    table = _build_jobs_table([j], 0, "alice", jupyter_ready={"22": True})
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(table)
+    plain = _re.sub(r"\x1b\[[0-9;]*m", "", cap.get())
+    assert "RUNNING" in plain and "STARTING" not in plain
+
+
+def test_dashboard_offers_connect_key_for_jupyter_jobs():
+    """The connect ritual must be reachable from the dashboard (key t —
+    c is taken by cancel)."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "dashboard.py").read_text()
+    assert 'key == "t"' in src
+    assert "parse_connect" in src and "render_card" in src

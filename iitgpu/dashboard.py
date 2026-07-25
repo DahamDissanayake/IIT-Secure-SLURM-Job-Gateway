@@ -123,6 +123,14 @@ def _is_jupyter_job(job_id: str, jdir: str) -> bool:
     return (Path(log_path).parent / ".iit-jupyter").exists()
 
 
+def _is_ready_job(job_id: str, jdir: str) -> bool:
+    """True when the job's folder contains the .iit-ready marker."""
+    log_path = _find_job_log(job_id, jdir)
+    if log_path is None:
+        return False
+    return (Path(log_path).parent / ".iit-ready").exists()
+
+
 # ── Cluster panel (compact summary bar) ──────────────────────────────────────
 
 def _build_cluster_panel(stats: NodeStats | None) -> Panel:
@@ -162,7 +170,8 @@ def _build_cluster_panel(stats: NodeStats | None) -> Panel:
 
 # ── Jobs table ────────────────────────────────────────────────────────────────
 
-def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: str) -> Table:
+def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: str,
+                      jupyter_ready: dict[str, bool] | None = None) -> Table:
     table = Table(
         show_header=True, header_style="bold cyan",
         box=box.SIMPLE, expand=True, show_edge=False,
@@ -207,6 +216,9 @@ def _build_jobs_table(jobs: list[QueueEntry], selected_idx: int, current_user: s
             )
         elif j.state in ("RUNNING", "COMPLETING"):
             label = "RUNNING" if j.state == "RUNNING" else "FINISHING"
+            if jupyter_ready is not None and j.job_id in jupyter_ready:
+                if j.state == "RUNNING" and not jupyter_ready[j.job_id]:
+                    label = "STARTING"
             is_own = j.user == current_user
             run_color = "green" if is_own else "cyan"
             user_markup = f"[bold]{j.user[:8]}[/]" if is_own else f"[dim]{j.user[:8]}[/]"
@@ -265,6 +277,7 @@ def _build_layout(
     is_jupyter: bool = False,
     log_scroll: int = 0,
     is_admin: bool = False,
+    jupyter_ready: dict[str, bool] | None = None,
 ) -> Layout:
     layout = Layout()
     jobs_height = min(len(jobs) + 6, 16)
@@ -280,7 +293,7 @@ def _build_layout(
 
     if jobs:
         layout["jobs"].update(
-            Panel(_build_jobs_table(jobs, selected_idx, current_user),
+            Panel(_build_jobs_table(jobs, selected_idx, current_user, jupyter_ready=jupyter_ready),
                   title="[bold]Job Queue[/bold]", border_style="cyan")
         )
     else:
@@ -343,10 +356,11 @@ def _build_layout(
                   and selected_job and selected_job.state == "RUNNING")
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
+    connect_hint = "   [bold]T=connect[/bold]" if is_jupyter else ""
     admin_tag   = "  [dim](admin)[/dim]" if is_admin else ""
     layout["footer"].update(
         f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh"
-        f"   ↑↓=scroll  PgUp/PgDn=jump{admin_tag}[/dim]"
+        f"   ↑↓=scroll  PgUp/PgDn=jump{connect_hint}{admin_tag}[/dim]"
     )
     return layout
 
@@ -547,9 +561,10 @@ def run_dashboard(job_id: str | None = None) -> None:
     _is_jupyter:   list[bool]             = [False]
     _log_scroll:   list[int]              = [0]
     _warned_jobs:  set[str]               = set()    # job IDs already warned
+    _jready:       dict[str, bool]        = {}
 
     def _refresh_data() -> None:
-        nonlocal jobs, selected_idx
+        nonlocal jobs, selected_idx, _jready
         _node_stats[0] = get_node_stats()
         jobs = _merged_jobs(jdir)
         if jobs and selected_idx >= len(jobs):
@@ -572,6 +587,11 @@ def run_dashboard(job_id: str | None = None) -> None:
         _log_lines[0]    = lines
         _log_path_ref[0] = path
         _last_data_ts[0] = time.monotonic()
+        _new_jready: dict[str, bool] = {}
+        for _j in jobs:
+            if _j.state == "RUNNING" and _is_jupyter_job(_j.job_id, str(Path(jdir) / _j.user)):
+                _new_jready[_j.job_id] = _is_ready_job(_j.job_id, str(Path(jdir) / _j.user))
+        _jready = _new_jready
         # detect jupyter + 30-min warning (own jobs only)
         if sel and is_own and sel.job_id:
             _is_jupyter[0] = _is_jupyter_job(sel.job_id, str(Path(jdir) / sel.user))
@@ -619,6 +639,7 @@ def run_dashboard(job_id: str | None = None) -> None:
                     _is_jupyter[0],
                     _log_scroll[0],
                     _admin,
+                    jupyter_ready=_jready,
                 ))
 
                 key = _wait_key(1.0 / _DISPLAY_FPS)
@@ -687,6 +708,19 @@ def run_dashboard(job_id: str | None = None) -> None:
                             _audit2.log("jupyter_extend", detail="+2h", job_id=sel.job_id)
                         import time as _t2; _t2.sleep(0.8)
                         _refresh_data()
+                        live.start()
+                elif key == "t":
+                    sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
+                    if sel and sel.user == current_user and _is_jupyter[0]:
+                        from iitgpu.connect import parse_connect, render_card
+                        _log = _find_job_log(sel.job_id, str(Path(jdir) / sel.user))
+                        _info = parse_connect(Path(_log).read_text()) if _log else None
+                        live.stop()
+                        if _info:
+                            console.print(render_card(_info))
+                        else:
+                            console.print("[yellow]Not ready yet — no tunnel info in the job output.[/]")
+                        input("Press Enter to return to the dashboard…")
                         live.start()
                 elif key == "r":
                     _log_scroll[0] = 0

@@ -159,7 +159,8 @@ jobs fits the node (as `test_sharding` does today).
   Timeout: after 90s of no marker with the job still RUNNING, show the log tail
   and keep offering to wait; if the job left RUNNING, show the error tail.
 - Dashboard: jupyter jobs show `STARTING` until `.iit-ready` exists, then
-  `RUNNING`; new key `C` on a selected jupyter job re-prints the Connect card.
+  `RUNNING`; new key `t` on a selected jupyter job re-prints the Connect card
+  (`c` was already cancel).
 
 ### 6. Structure
 
