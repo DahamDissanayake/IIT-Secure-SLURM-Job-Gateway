@@ -257,8 +257,12 @@ apptainer exec --nv --bind /shared /shared/images/llm-finetune.sif bash -lc 'pyt
     assert result.get("conda_env", "") == ""
 
 
-def test_wizard_accepts_prefill_without_error(monkeypatch):
-    """run_wizard(prefill=...) must not raise when all prompts are mocked."""
+def test_wizard_accepts_prefill_without_error(monkeypatch, tmp_path):
+    """run_wizard(prefill=...) must not raise when all prompts are mocked.
+
+    Both prefill shapes the rerun path can produce: without a script_path the
+    flow stops at the script intake, with one it goes straight to the hub.
+    """
     import iitgpu.wizard as wiz
 
     # Mock all questionary prompts to bail out immediately
@@ -274,9 +278,19 @@ def test_wizard_accepts_prefill_without_error(monkeypatch):
         "questionary.text",
         lambda *a, **kw: MagicMock(ask=lambda: ""),
     )
+    monkeypatch.setattr(
+        "questionary.autocomplete",
+        lambda *a, **kw: MagicMock(ask=lambda: None),
+    )
 
-    # Should return cleanly (wizard exits when select returns None)
+    # Should return cleanly (wizard exits when the script intake cancels)
     wiz.run_wizard(prefill={"task_type": "train", "conda_env": "/shared/envs/x"})
+
+    # With a script the intake is skipped — the hub takes over and cancels.
+    script = tmp_path / "train.py"
+    script.write_text("print(1)\n")
+    wiz.run_wizard(prefill={"gpu_shards": 2, "cpus": 8, "mem_gb": 16,
+                            "time_limit": "02:00:00", "script_path": str(script)})
 
 
 # ── Email auto-wire ────────────────────────────────────────────────────────────
@@ -498,24 +512,32 @@ def test_step_counter_increments_per_call():
     assert _S("Your model:")       == "Step 4 — Your model:"
 
 
-def test_wizard_early_bypass_confirm_is_shown(monkeypatch):
+def test_own_sbatch_lives_under_other_and_stops_interrupting(monkeypatch):
+    """The own-.sbatch bypass used to stop every user mid-flow with a confirm
+    they mostly answered "no" to. It now sits under "Other" — two selects for
+    the people who want it, invisible to everyone else."""
     import iitgpu.wizard as wiz
+
     confirms_seen = []
     def _cap_confirm(msg, **kw):
         confirms_seen.append(msg)
         return MagicMock(ask=lambda: False)
-    call_count = [0]
+    picks = iter([wiz._OTHER_CHOICE, "Submit my own .sbatch"])
     def _cap_select(*a, **kw):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return MagicMock(ask=lambda: list(wiz._TASK_LABELS.values())[1])
-        return MagicMock(ask=lambda: None)
+        return MagicMock(ask=lambda: next(picks, None))
+
+    reached = []
     monkeypatch.setattr("questionary.confirm", _cap_confirm)
     monkeypatch.setattr("questionary.select", _cap_select)
     monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
+    monkeypatch.setattr(wiz, "_run_own_sbatch", lambda *a: reached.append(a))
+
     wiz.run_wizard()
-    bypass_prompts = [m for m in confirms_seen if "ready-made" in m or ".sbatch" in m]
-    assert bypass_prompts, f"Early bypass confirm not seen. Confirms: {confirms_seen}"
+
+    assert reached, "Other → Submit my own .sbatch must reach the own-sbatch path"
+    assert not any("ready-made" in m for m in confirms_seen), (
+        f"the mid-flow bypass confirm must be gone. Confirms: {confirms_seen}"
+    )
 
 
 def test_settings_menu_no_duplicates():
@@ -559,22 +581,26 @@ def test_vram_check_passes_when_enough_free(monkeypatch):
     assert result is True
 
 
-def test_vram_check_blocks_when_insufficient_vram(monkeypatch):
-    """_vram_check returns False (cancel) when requested VRAM exceeds free headroom
-    and the user declines the override prompt."""
+def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
+    """The VRAM gate is gone. It asked for an estimate that bound nobody — VRAM
+    is shared between concurrent jobs and SLURM does not enforce it — and then
+    refused the job on the strength of that guess. _vram_check now states the
+    situation and always proceeds, even with the card nearly full."""
     from unittest.mock import patch
     import iitgpu.wizard as wiz
 
-    # 12 GB in use, 32 GB total → 20 GB free; request 28 GB → shortfall 8 GB
-    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
+    # 30 GB in use of 32 GB — the old gate would have blocked here.
+    stats = _make_stats(gpu_mem_used_mb=30720, gpu_mem_total_mb=32768)
+
+    def _no_prompt(*a, **kw):
+        raise AssertionError("_vram_check must not ask the user anything")
+
     with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
-         patch("questionary.text") as mock_text, \
-         patch("questionary.confirm") as mock_confirm:
-        mock_text.return_value.ask.return_value = "28"
-        mock_confirm.return_value.ask.return_value = False   # user says don't override
+         patch("questionary.text", side_effect=_no_prompt), \
+         patch("questionary.confirm", side_effect=_no_prompt):
         result = wiz._vram_check("train")
 
-    assert result is False
+    assert result is True
 
 
 def test_vram_check_allows_override_when_user_confirms(monkeypatch):
@@ -620,24 +646,20 @@ def test_vram_check_skips_when_stats_unavailable(monkeypatch):
     assert result is True
 
 
-def test_vram_check_uses_task_default_for_inference(monkeypatch):
-    """_vram_check seeds the prompt default from _VRAM_TASK_DEFAULTS."""
-    from unittest.mock import patch, call
+def test_vram_check_reports_the_fair_share_without_asking(capsys):
+    """What survives of the check is the useful half: the live reading and what
+    one slice's fair share of the card actually is, printed, not asked."""
+    from unittest.mock import patch
     import iitgpu.wizard as wiz
 
     stats = _make_stats(gpu_mem_used_mb=0, gpu_mem_total_mb=32768)
-    captured_default = []
-
-    def fake_text(prompt, default="", **kw):
-        captured_default.append(default)
-        m = type("M", (), {"ask": lambda self: default})()
-        return m
-
     with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
-         patch("questionary.text", side_effect=fake_text):
-        wiz._vram_check("inference")
+         patch("questionary.text", side_effect=AssertionError):
+        assert wiz._vram_check("inference") is True
 
-    assert captured_default and captured_default[0] == "8"
+    out = " ".join(capsys.readouterr().out.split())   # rich wraps; ignore layout
+    assert "about 8 GB" in out
+    assert "not enforced" in out
 
 
 def test_vram_check_present_in_wizard_source():
@@ -771,3 +793,30 @@ def test_post_submit_gone_tails_stderr(monkeypatch, tmp_path):
 
     rendered = test_console.export_text()
     assert "ERROR: JupyterLab is missing" in rendered
+
+
+# ── Launch-flow rewrite ──────────────────────────────────────────────────────
+
+def test_wizard_offers_three_intents_not_seven_task_types():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "Open JupyterLab" in src
+    assert "Run a script or notebook" in src
+    assert "Open a shell on the GPU node" in src
+    assert "Step 1 — What are you doing?" not in src
+
+
+def test_wizard_no_longer_quizzes_vram_but_keeps_the_wording():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "Estimated VRAM your job needs" not in src
+    i = src.index("def _vram_check")
+    body = src[i:i + 1800]
+    assert "shared" in body.lower() and "not enforced" in body.lower()
+
+
+def test_wizard_hands_off_to_the_hub():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "run_hub" in src and "default_spec" in src
+    assert "recent_scripts" in src and "autocomplete" in src

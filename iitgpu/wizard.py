@@ -5,6 +5,7 @@ import getpass
 import grp
 import os
 import re
+import shlex
 import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -14,7 +15,12 @@ from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import load_config, jobs_dir, user_dir
-from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, resource_defaults
+from iitgpu.jobs import (SHARDS_PER_GPU, JobSpec, build_interactive_cmd,
+                         gpu_share_note, make_job_folder, pip_install_block,
+                         render_notebook_sbatch, render_sbatch, resource_defaults)
+from iitgpu.launchspec import (LaunchSpec, default_spec, from_rerun, from_template,
+                               recent_scripts, to_job_spec)
+from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
 from iitgpu.ui import err, header, info, kv, ok, panel, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
@@ -37,14 +43,24 @@ _STYLE = Style([
     ("selected", "fg:magenta"),
 ])
 
-_TASK_LABELS: dict[str, str] = {
-    "notebook":    "Notebook (JupyterLab)  — interactive GPU session",
-    "train":       "Train from scratch",
-    "finetune":    "Fine-tune a model",
-    "inference":   "Run inference / generate output",
-    "test":        "Quick test  (30 min, reduced resources)",
-    "interactive": "Interactive shell on the GPU node  (srun --pty)",
-}
+# The whole intake is three questions wide: what you are doing, what you are
+# running it on, and — everything else — the review hub. The old seven
+# task-type labels asked the user to classify their work before the tool would
+# talk to them; the classification only ever picked a resource default, which
+# the hub now shows and lets them change directly.
+_INTENTS: list[tuple[str, str]] = [
+    ("notebook", "Open JupyterLab            — interactive notebook on the GPU"),
+    ("batch",    "Run a script or notebook   — batch job (.py or .ipynb)"),
+    ("shell",    "Open a shell on the GPU node"),
+]
+
+_OTHER_CHOICE = "Other: my own .sbatch · templates"
+
+# What the batch intake will accept, typed or browsed.
+_BATCH_EXTS = (".py", ".sh", ".ipynb")
+
+# Internal task_type recorded on the JobSpec (audit trail + resource archaeology).
+_TASK_TYPE = {"notebook": "notebook", "shell": "interactive", "batch": "custom"}
 
 
 def _browse_script(start_dir: str, jail=in_jail, exts=(".py", ".sh")) -> str | None:
@@ -293,53 +309,6 @@ def _validate_and_show_errors(script_text: str, username: str, cfg) -> bool:
     return True
 
 
-def _tier2_edit(script_text: str, username: str, cfg) -> str | None:
-    """Open the generated script in an editor; validate on save. Returns final text or None."""
-    import subprocess, tempfile, difflib
-    from iitgpu.ui import info, warn, err as _err
-    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
-    while True:
-        with tempfile.NamedTemporaryFile(suffix=".sbatch", mode="w",
-                                         delete=False, prefix="iitgpu_") as tf:
-            tf.write(script_text)
-            tmpfile = tf.name
-        try:
-            subprocess.run([editor, tmpfile])
-            with open(tmpfile) as f:
-                edited = f.read()
-        except (OSError, FileNotFoundError) as exc:
-            _err(f"Editor failed ({exc}). Falling back to nano.")
-            try:
-                subprocess.run(["nano", tmpfile])
-                with open(tmpfile) as f:
-                    edited = f.read()
-            except OSError:
-                return None
-        finally:
-            try:
-                os.unlink(tmpfile)
-            except OSError:
-                pass
-
-        if not _validate_and_show_errors(edited, username, cfg):
-            import questionary
-            if not questionary.confirm("Fix errors and try again?", default=True,
-                                       style=_STYLE).ask():
-                return None
-            script_text = edited
-            continue
-
-        diff = list(difflib.unified_diff(
-            script_text.splitlines(keepends=True),
-            edited.splitlines(keepends=True),
-            fromfile="generated", tofile="edited",
-        ))
-        if diff:
-            from iitgpu import auditclient
-            auditclient.log("sbatch_edited", meta={"diff": "".join(diff[:40])})
-        return edited
-
-
 def _tier3_own_script(username: str, cfg) -> str | None:
     """Browse to a user's .sbatch file; validate and return its content."""
     import questionary
@@ -398,83 +367,35 @@ def _tier3_own_script(username: str, cfg) -> str | None:
         return text
 
 
-_VRAM_TASK_DEFAULTS: dict[str, int] = {
-    "test":        4,
-    "inference":   8,
-    "notebook":    8,
-    "train":       0,
-    "finetune":    0,
-    "custom":      0,
-}
+def _vram_check(task_type: str = "") -> bool:
+    """State the VRAM situation at submit time. Asks nothing, blocks nothing.
 
-
-def _vram_check(task_type: str) -> bool:
-    """Prompt for estimated VRAM, check against live free VRAM, block/warn if tight.
-
-    Returns True  → proceed with submission.
-    Returns False → user chose to cancel.
+    This used to interrogate the user for an estimate and refuse the job when
+    it exceeded free headroom. That gate was theatre: VRAM is shared between
+    concurrent jobs and is not enforced by SLURM, so a number typed here bound
+    nobody — least of all the job that OOMs you thirty seconds later. The
+    review hub now states the same fact where the sizing decision is actually
+    made, so what is left here is the live reading and the caveat, printed with
+    the submit confirmation. Always returns True.
     """
-    from iitgpu.ui import console as _con
-
-    # Always show current VRAM state as context.
     try:
         stats = get_node_stats()
     except Exception:
         stats = None
 
-    if stats and stats.live_stats:
+    if stats and getattr(stats, "live_stats", False):
         total_gb = stats.gpu_mem_total_mb / 1024
         used_gb  = stats.gpu_mem_used_mb  / 1024
         free_gb  = total_gb - used_gb
-        info(
-            f"GPU VRAM: [green]{free_gb:.1f} GB free[/]  [dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]"
-        )
-    else:
-        free_gb = None
-        warn("Live GPU stats unavailable — VRAM check will be skipped.")
-
-    default_vram = _VRAM_TASK_DEFAULTS.get(task_type, 0)
-    from iitgpu.jobs import SHARDS_PER_GPU
-    if free_gb is not None:
-        _slice_gb = (stats.gpu_mem_total_mb / 1024) / SHARDS_PER_GPU
-        info(f"Your slice's fair share is about {_slice_gb:.0f} GB. "
+        slice_gb = total_gb / SHARDS_PER_GPU
+        info(f"GPU VRAM: [green]{free_gb:.1f} GB free[/]  "
+             f"[dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]")
+        info(f"Your slice's fair share is about {slice_gb:.0f} GB. "
              f"VRAM is shared between concurrent jobs and is not enforced, so "
              f"this is a budget, not a guarantee — going over can OOM someone else.")
-    raw = questionary.text(
-        "Estimated VRAM your job needs (GB, 0 = skip check):",
-        default=str(default_vram),
-        style=_STYLE,
-    ).ask()
-    if raw is None:
-        return False
-    try:
-        needed_gb = max(0.0, float(raw.strip()))
-    except ValueError:
-        needed_gb = 0.0
-
-    if needed_gb <= 0 or free_gb is None:
-        return True
-
-    if needed_gb > free_gb:
-        from rich.panel import Panel
-        shortfall = needed_gb - free_gb
-        body = (
-            f"\n"
-            f"  [bold]Available VRAM:[/]  [red]{free_gb:.1f} GB[/]"
-            f"  [dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]\n"
-            f"  [bold]Requested     :[/]  [yellow]{needed_gb:.0f} GB[/]\n"
-            f"  [bold]Shortfall     :[/]  [red]{shortfall:.1f} GB[/]\n\n"
-            f"  [dim]Wait for a running job to finish, or reduce batch size / precision.[/]\n"
-        )
-        _con.print(Panel(body, title="[bold red] GPU VRAM conflict — job will likely OOM [/]",
-                         border_style="red"))
-        override = questionary.confirm(
-            "Submit anyway? (the job will probably crash with CUDA OOM)",
-            default=False, style=_STYLE,
-        ).ask()
-        return bool(override)
-
-    ok(f"VRAM OK — {needed_gb:.0f} GB requested, {free_gb:.1f} GB free.")
+    else:
+        info("Live GPU stats unavailable. VRAM is shared between concurrent jobs "
+             "and is not enforced — treat your fair share as a budget.")
     return True
 
 
@@ -544,15 +465,159 @@ def _post_submit_notebook(job_id: str, folder: str) -> None:
         info("Watch it in the dashboard — press T on the job for the Connect card.")
 
 
-def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity ok for a wizard)
+def _run_own_sbatch(cfg, user: str, jdir: str) -> None:
+    """Submit a ready-made .sbatch verbatim — the "I already know what I want"
+    escape hatch, moved out of the old linear flow unchanged.
+
+    A job folder is still created so the script and its output land where every
+    other job's do, the file still passes validate_sbatch (via
+    `_tier3_own_script`), and the same job_submit audit pair still runs. What is
+    gone is only its old position: it used to interrupt everyone mid-wizard with
+    a confirm; now it lives under "Other", where the people who want it look.
+    """
+    defaults = resource_defaults("custom")
+    folder = make_job_folder(jdir, JobSpec(
+        job_name="custom", partition=cfg.partition,
+        gpu_shards=defaults.gpu_shards, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
+        time_limit=defaults.time_limit or "02:00:00", run_command="",
+        task_type="custom",
+    ))
+    text = _tier3_own_script(user, cfg)
+    if text is None:
+        shutil.rmtree(folder, ignore_errors=True)
+        info("Discarded.")
+        return
+
+    sbatch_path = str(Path(folder) / "job.sbatch")
+    Path(sbatch_path).write_text(text)
+    Path(sbatch_path).chmod(0o644)
+    kv("Script saved", sbatch_path)
+
+    if not auditclient.log_or_block("job_submit", detail="custom",
+                                    meta={"own_sbatch": True}):
+        err("Audit logging failed. Refusing to submit (safety policy).")
+        shutil.rmtree(folder, ignore_errors=True)
+        return
+
+    success, result = submit_job(sbatch_path)
+    if success:
+        ok(f"Job submitted! ID: {result}")
+        auditclient.log("job_submitted_ok", detail="custom", job_id=result)
+    else:
+        err(f"Submission failed: {result}")
+        auditclient.log("job_submit_failed", detail=result)
+
+
+def _notebook_run_command(ls: LaunchSpec) -> str:
+    """Bash that runs a .ipynb top-to-bottom as a batch job.
+
+    papermill streams each cell's stdout/stderr into the job log as it executes
+    (`--log-output`), so a long training cell shows progress instead of looking
+    hung; `jupyter nbconvert --execute` is the fallback when papermill is not in
+    the environment. Either way the executed copy is written into the job folder
+    (the script's cwd), so the user's own notebook is never modified in place.
+    """
+    nb = shlex.quote(ls.script)
+    out = shlex.quote(f"{Path(ls.script).stem}.executed.ipynb")
+    label = shlex.quote(f"Executing notebook: {Path(ls.script).name}")
+    return pip_install_block(ls.requirements, ls.packages) + (
+        f"echo {label}\n"
+        "if command -v papermill >/dev/null 2>&1; then\n"
+        f"    papermill --log-output {nb} {out}\n"
+        "else\n"
+        f"    jupyter nbconvert --to notebook --execute --output {out} {nb}\n"
+        "fi"
+    )
+
+
+def _build_run_command(ls: LaunchSpec) -> str:
+    """The single command the batch job runs. `ls.args` is baked in here — it is
+    part of the command line, never a JobSpec field.
+
+    The args are re-cleaned even though the hub's editor already cleaned what it
+    accepted: a LaunchSpec can also arrive from a template file on disk, which
+    nothing in this process typed.
+    """
+    args = clean_run_command(ls.args) if ls.args else ""
+    if ls.script.endswith(".ipynb"):
+        if args:
+            warn("Extra arguments do not apply to a notebook — ignoring them.")
+        return _notebook_run_command(ls)
+    runner = "bash" if ls.script.endswith(".sh") else "python3"
+    cmd = f"{runner} {shlex.quote(ls.script)}"
+    return f"{cmd} {args}".rstrip() if args else cmd
+
+
+def _task_type_for(ls: LaunchSpec) -> str:
+    """Internal task_type for the audit trail (not a question the user answers)."""
+    if ls.intent == "batch" and ls.script.endswith(".ipynb"):
+        return "notebook-script"
+    return _TASK_TYPE.get(ls.intent, "custom")
+
+
+_NAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _job_name_for(ls: LaunchSpec) -> str:
+    """Name the job after what it runs, so the queue is readable at a glance."""
+    if ls.intent == "batch" and ls.script:
+        stem = _NAME_SAFE.sub("_", Path(ls.script).stem).strip("_")[:40]
+        if stem:
+            return stem
+    return {"notebook": "notebook", "shell": "interactive"}.get(ls.intent, "job")
+
+
+def _pick_batch_script(jdir: str, user: str, browse_jail, start_dir: str) -> str | None:
+    """Type a path or pick a recent one — the batch flow's only required question.
+
+    Typed input skips the browser, so the jail, the extension and the file's
+    existence are all re-checked here: this is the boundary, not the browser.
+    """
+    choices = recent_scripts(jdir, user) + ["[browse…]"]
+    for _ in range(6):
+        raw = questionary.autocomplete(
+            "Script or notebook (.py/.ipynb/.sh) — type a path or pick:",
+            choices=choices, style=_STYLE,
+        ).ask()
+        if raw is None:
+            return None
+        raw = raw.strip()
+        if not raw:
+            return None
+        if raw == "[browse…]":
+            picked = _browse_script(start_dir, browse_jail, exts=_BATCH_EXTS)
+            if picked is None:
+                return None
+            raw = picked
+        if not raw.endswith(_BATCH_EXTS):
+            warn(f"Not a runnable script. Allowed: {', '.join(_BATCH_EXTS)}")
+            continue
+        if not browse_jail(raw):
+            warn("That path is outside the directories you are allowed to use.")
+            continue
+        if not Path(raw).is_file():
+            warn(f"No such file: {raw}")
+            continue
+        return raw
+    return None
+
+
+def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, read top to bottom)
+    """Intent → intake → review hub → submit.
+
+    Three screens, not seven prompts: pick what you are doing, say what you are
+    running (batch only), then land on the hub — one editable summary that shows
+    live GPU availability where the decision is made. Everything the old linear
+    flow interrogated up front (environment, size, time, data, model, args,
+    arrays, dependencies, mail) is a row on that hub, defaulted and skippable.
+    """
     cfg = load_config()
     jdir = jobs_dir(cfg)
     user = getpass.getuser()
 
     # Role-aware file-browser jail (mirrors files.py). Regular users browse and
     # pick data/scripts from their own shared/users/<user> area (plus read-only
-    # shared models/envs); admins get the full NFS jail. Used as the navigation
-    # predicate for _browse_data_folder / _browse_script below.
+    # shared models/envs); admins get the full NFS jail.
     from iitgpu.config import is_admin
     from iitgpu.validate import in_user_browse_jail
     _admin = is_admin(cfg)
@@ -575,46 +640,99 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
 
     header("New Job")
 
-    # ── Step 0: Optional template load (skip when prefilling from rerun) ─────
-    _tdefaults: dict = prefill or {}
-    if not _tdefaults:
-        if questionary.confirm(
-            "Load from a saved template?", default=False, style=_STYLE
-        ).ask():
+    # ── Intake ───────────────────────────────────────────────────────────────
+    if prefill:
+        # Re-run: the previous job's own sbatch is the source of truth for
+        # sizing; the hub is where anything about it gets changed.
+        ls = from_rerun(prefill, prefill.get("script_path", ""))
+        info("Pre-filled from the previous run — change anything below.")
+    else:
+        choice = questionary.select(
+            "What do you want to do?",
+            choices=[label for _, label in _INTENTS]
+                    + [questionary.Separator(), _OTHER_CHOICE],
+            style=_STYLE,
+        ).ask()
+        if choice is None:
+            return
+
+        if choice == _OTHER_CHOICE:
+            sub = questionary.select(
+                "Other:",
+                choices=["Submit my own .sbatch", "Load a template", "back"],
+                style=_STYLE,
+            ).ask()
+            if sub == "Submit my own .sbatch":
+                _run_own_sbatch(cfg, user, jdir)
+                return
+            if sub != "Load a template":
+                return
             from iitgpu.templates import pick_template
             tdata = pick_template(cfg)
-            if tdata:
-                _tdefaults = tdata
+            if not tdata:
+                return
+            ls = from_template(tdata)
+        else:
+            intent = next((k for k, label in _INTENTS if label == choice), None)
+            if intent is None:
+                return
+            ls = default_spec(intent)
 
-    _prefill_hint = "  [pre-filled from previous run]" if prefill else ""
+    if ls.intent == "notebook":
+        ls.port = 8888
 
-    # ── Step 1: Task type ─────────────────────────────────────────────────────
-    _template_task_type = _tdefaults.get("task_type", "")
-    _default_label = _TASK_LABELS.get(_template_task_type, list(_TASK_LABELS.values())[0])
+    if ls.intent == "batch" and not ls.script:
+        picked = _pick_batch_script(jdir, user, _browse_jail, _user_browse_start())
+        if not picked:
+            return
+        ls.script = picked
 
-    task_choice = questionary.select(
-        "Step 1 — What are you doing?" + (_prefill_hint if _template_task_type else ""),
-        choices=list(_TASK_LABELS.values()),
-        default=_default_label,
-        style=_STYLE,
-    ).ask()
-    if task_choice is None:
-        return
-    task_type = next(k for k, v in _TASK_LABELS.items() if v == task_choice)
-    defaults = resource_defaults(task_type)
+    # ── Review hub — every remaining field lives here ────────────────────────
+    def _hub_browse_script():
+        start = _user_browse_start()
+        if ls.script and Path(ls.script).parent.is_dir() and _browse_jail(str(Path(ls.script).parent)):
+            start = str(Path(ls.script).parent)
+        return _browse_script(start, _browse_jail, exts=_BATCH_EXTS)
 
-    # ── Interactive GPU session (srun --pty) early return ────────────────────
-    if task_type == "interactive":
-        from iitgpu.jobs import build_interactive_cmd
-        spec = JobSpec(
-            job_name="interactive", partition=cfg.partition,
-            gpu_shards=defaults.gpu_shards, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
-            time_limit=defaults.time_limit or "02:00:00", run_command="",
-            task_type="interactive",
+    def _hub_browse_data():
+        return _browse_data_folder(_user_browse_start(), _browse_jail)
+
+    def _hub_deps():
+        return _notebook_deps_prompt(
+            ls.script, _browse_jail, _user_browse_start(),
+            question="Optional — Pre-install packages for this session?",
         )
+
+    while True:
+        outcome = run_hub(ls, cfg, user, browse_script=_hub_browse_script,
+                          browse_data=_hub_browse_data, deps_prompt=_hub_deps)
+        if outcome is None:
+            info("Cancelled.")
+            return
+        if outcome != "template":
+            break
+        tname = questionary.text("Template name:", default=_job_name_for(ls),
+                                 style=_STYLE).ask()
+        if tname and tname.strip():
+            from iitgpu.templates import save_template
+            tspec = to_job_spec(ls, user=user, partition=cfg.partition,
+                                job_name=tname.strip(), task_type=_task_type_for(ls),
+                                run_command=_build_run_command(ls) if ls.intent == "batch" else "")
+            if save_template(cfg, tname.strip(), tspec):
+                ok(f"Template '{tname.strip()}' saved.")
+                auditclient.log("job_template_saved", detail=tname.strip())
+
+    job_name = _job_name_for(ls)
+    task_type = _task_type_for(ls)
+
+    # ── Shell: an allocation, not a job file ─────────────────────────────────
+    if ls.intent == "shell":
+        spec = to_job_spec(ls, user=user, partition=cfg.partition,
+                           job_name="interactive", task_type="interactive")
         cmd = build_interactive_cmd(spec, partition=cfg.partition)
         info("Requesting an interactive GPU allocation — you will land in a shell")
         info("ON the compute node. It ends when you type 'exit' or the time limit hits.")
+        info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
         panel("Interactive command", " ".join(cmd))
         if not questionary.confirm(
             "Start interactive session now?", default=True, style=_STYLE
@@ -632,342 +750,34 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         info("Interactive session ended.")
         return
 
-    # ── Step counter (auto-increments per shown step, so numbering stays
-    # correct regardless of which task-type-specific steps are skipped) ─────
-    _step_n = 1
+    # ── Notebook: a JupyterLab session on the node ───────────────────────────
+    if ls.intent == "notebook":
+        spec = to_job_spec(ls, user=user, partition=cfg.partition,
+                           job_name=job_name, task_type=task_type)
+        # Auto-populate the SLURM mail directive from users.db — but only when
+        # the user has not turned notifications off in the hub's Advanced menu.
+        if ls.mail:
+            from iitgpu.notify import mta_present
+            from iitgpu import daemonclient
+            if mta_present():
+                _registered_email = daemonclient.email_for(user)
+                if _registered_email:
+                    spec.mail_user = _registered_email
 
-    def _S(label: str) -> str:
-        nonlocal _step_n
-        _step_n += 1
-        return f"Step {_step_n} \u2014 {label}"
-
-    # ── Early bypass: bring your own .sbatch ─────────────────────────────────
-    if questionary.confirm(
-        "Skip setup and submit your own ready-made .sbatch file?",
-        default=False, style=_STYLE,
-    ).ask():
-        _byp_folder = make_job_folder(jdir, JobSpec(
-            job_name=task_type, partition=cfg.partition,
-            gpu_shards=defaults.gpu_shards, cpus=defaults.cpus, mem_gb=defaults.mem_gb,
-            time_limit=defaults.time_limit or "02:00:00", run_command="",
-            task_type=task_type,
-        ))
-        _byp_text = _tier3_own_script(user, cfg)
-        if _byp_text is None:
-            shutil.rmtree(_byp_folder, ignore_errors=True)
-            info("Discarded.")
-            return
-        _byp_sbatch = str(Path(_byp_folder) / "job.sbatch")
-        Path(_byp_sbatch).write_text(_byp_text)
-        Path(_byp_sbatch).chmod(0o644)
-        kv("Script saved", _byp_sbatch)
-        if not auditclient.log_or_block("job_submit", detail=task_type,
-                                        meta={"own_sbatch": True}):
-            err("Audit logging failed. Refusing to submit (safety policy).")
-            shutil.rmtree(_byp_folder, ignore_errors=True)
-            return
-        _byp_ok, _byp_res = submit_job(_byp_sbatch)
-        if _byp_ok:
-            ok(f"Job submitted! ID: {_byp_res}")
-            auditclient.log("job_submitted_ok", detail=task_type, job_id=_byp_res)
-        else:
-            err(f"Submission failed: {_byp_res}")
-            auditclient.log("job_submit_failed", detail=_byp_res)
-        return
-
-    # ── Step 2: Environment ───────────────────────────────────────────────────
-    from iitgpu.envs import list_all_envs
-    from iitgpu.containers import list_images, validate_image
-    envs = list_all_envs(cfg)
-    chosen_env = None
-    chosen_container: str = ""
-
-    _prefill_conda = _tdefaults.get("conda_env", "")
-    _prefill_container = _tdefaults.get("container_image", "")
-    if _prefill_conda:
-        _env_type_default = "Conda / venv environment"
-    elif _prefill_container:
-        _env_type_default = "Container image  (.sif via Apptainer)"
-    else:
-        _env_type_default = "Conda / venv environment"
-
-    env_type = questionary.select(
-        _S("Environment type:")
-        + (_prefill_hint if (_prefill_conda or _prefill_container) else ""),
-        choices=[
-            "Conda / venv environment",
-            "Container image  (.sif via Apptainer)",
-            "[none / skip]",
-        ],
-        default=_env_type_default,
-        style=_STYLE,
-    ).ask()
-    if env_type is None:
-        return
-
-    if env_type == "Conda / venv environment":
-        if not envs:
-            warn("No environments registered. Run Settings → Build environment first.")
-            if not questionary.confirm(
-                "Continue without an environment?", default=False, style=_STYLE
-            ).ask():
-                return
-        else:
-            env_choices = [f"{e.name}  ({e.kind})" for e in envs] + ["[none / skip]"]
-            _env_sel_default = None
-            if _prefill_conda:
-                _env_sel_default = next(
-                    (f"{e.name}  ({e.kind})"
-                     for e in envs
-                     if e.path == _prefill_conda or e.name == _prefill_conda),
-                    None,
-                )
-            env_sel = questionary.select(
-                "Which environment?"
-                + (_prefill_hint if _env_sel_default else ""),
-                choices=env_choices,
-                default=_env_sel_default,
-                style=_STYLE,
-            ).ask()
-            if env_sel is None:
-                return
-            if env_sel != "[none / skip]":
-                chosen_name = env_sel.split("  (")[0]
-                chosen_env = next((e for e in envs if e.name == chosen_name), None)
-
-    elif env_type == "Container image  (.sif via Apptainer)":
-        images = list_images(cfg.nfs_root)
-        if not images:
-            warn(f"No .sif images found in {cfg.nfs_root}/images/")
-            warn("Build or pull images first (see deploy/build-images.md).")
-            if not questionary.confirm(
-                "Enter image path manually?", default=False, style=_STYLE
-            ).ask():
-                return
-            manual = questionary.text("Full path to .sif image:", style=_STYLE).ask()
-            if not manual or not manual.strip():
-                return
-            chosen_container = manual.strip()
-        else:
-            img_choices = (
-                [Path(i).name + "  " + i for i in images]
-                + ["[enter path manually]", "[cancel]"]
-            )
-            _img_default = None
-            if _prefill_container:
-                _img_default = next(
-                    (Path(i).name + "  " + i for i in images if i == _prefill_container),
-                    None,
-                )
-            img_sel = questionary.select(
-                "Which container image?"
-                + (_prefill_hint if _img_default else ""),
-                choices=img_choices,
-                default=_img_default,
-                style=_STYLE,
-            ).ask()
-            if img_sel is None or img_sel == "[cancel]":
-                return
-            if img_sel == "[enter path manually]":
-                manual = questionary.text("Full path to .sif image:", style=_STYLE).ask()
-                if not manual or not manual.strip():
-                    return
-                chosen_container = manual.strip()
-            else:
-                chosen_container = img_sel.split("  ", 1)[1].strip()
-
-        if chosen_container and not validate_image(chosen_container):
-            warn("Image path is outside the allowed jail or not a .sif — rejected.")
-            return
-        auditclient.log("container_selected", detail=Path(chosen_container).name)
-
-    # ── Step 3: Your data (skip for notebook) ────────────────────────────────
-    data_path: str = ""
-    script_path: str | None = None
-    job_name = task_type
-
-    if task_type != "notebook":
-        _prefill_dp = _tdefaults.get("data_path", "")
-        data_choices = [
-            "a) Pick an existing folder",
-            "b) Upload from my computer  (scp/rsync instructions)",
-            "c) Download from a URL",
-            "d) Paste data inline",
-            "e) Skip (no data needed)",
-        ]
-        _data_default = "a) Pick an existing folder" if _prefill_dp else None
-
-        data_choice = questionary.select(
-            _S("Your data:")
-            + (_prefill_hint if _prefill_dp else ""),
-            choices=data_choices,
-            default=_data_default,
-            style=_STYLE,
-        ).ask()
-        if data_choice is None:
-            return
-
-        if data_choice.startswith("a)"):
-            _start = _user_browse_start()
-            if _prefill_dp and Path(_prefill_dp).exists() and _browse_jail(_prefill_dp):
-                _start = (
-                    _prefill_dp if Path(_prefill_dp).is_dir()
-                    else str(Path(_prefill_dp).parent)
-                )
-            _picked = _browse_data_folder(_start, _browse_jail)
-            if _picked:
-                data_path = _picked
-
-        elif data_choice.startswith("b)"):
-            from iitgpu.upload import run_upload
-            _uploaded = run_upload()
-            if _uploaded:
-                data_path = _uploaded
-
-        elif data_choice.startswith("c)"):
-            # _download_from_url(folder_path) writes files into a folder and returns None.
-            # Build a per-user download staging folder, then pass it as the target.
-            _dl_folder = str(Path(user_dir(cfg, user)) / "data" / "downloads")
-            if in_jail(_dl_folder):
-                Path(_dl_folder).mkdir(parents=True, exist_ok=True)
-                from iitgpu.upload import _download_from_url
-                if _download_from_url(_dl_folder) is not None:
-                    data_path = _dl_folder
-            else:
-                from iitgpu.upload import run_upload
-                run_upload()
-
-        elif data_choice.startswith("d)"):
-            _dp, _sp = _inline_paste(cfg, user)
-            if _dp:
-                data_path = _dp
-            if _sp:
-                script_path = _sp  # skip Step 5 browser
-
-    # ── Step 4: Your model (finetune / inference only) ────────────────────────
-    model_path: str = _tdefaults.get("model_path", "")
-
-    if task_type in ("finetune", "inference"):
-        model_choices = [
-            "a) Pick a downloaded model from registry",
-            "b) Download from HuggingFace now",
-            "c) Enter a path manually",
-            "d) Skip",
-        ]
-        model_choice = questionary.select(
-            _S("Your model:"), choices=model_choices, style=_STYLE
-        ).ask()
-        if model_choice is None:
-            return
-
-        if model_choice.startswith("a)"):
-            try:
-                from iitgpu.models import pick_model
-                _picked_model = pick_model(cfg)
-                if _picked_model is not None:
-                    model_path = _picked_model.path
-            except (ImportError, AttributeError):
-                from iitgpu.models import model_menu
-                model_menu(cfg)
-
-        elif model_choice.startswith("b)"):
-            # download_hf(cfg, repo_id) requires a repo_id; prompt first.
-            _repo_id = questionary.text(
-                "HuggingFace repo ID (e.g. mistralai/Mistral-7B-v0.1):",
-                style=_STYLE,
-            ).ask()
-            if _repo_id and _repo_id.strip():
-                try:
-                    from iitgpu.models import download_hf
-                    _ok, _dest = download_hf(cfg, _repo_id.strip())
-                    if _ok and _dest:
-                        model_path = _dest
-                except (ImportError, AttributeError):
-                    from iitgpu.models import model_menu
-                    model_menu(cfg)
-
-        elif model_choice.startswith("c)"):
-            _manual_mp = questionary.text("Full model path:", style=_STYLE).ask()
-            if _manual_mp and _manual_mp.strip():
-                if in_jail(_manual_mp.strip()):
-                    model_path = _manual_mp.strip()
-                else:
-                    warn("Path is outside the allowed jail — rejected.")
-
-    # ── Step 5: Notebook config OR Script ─────────────────────────────────────
-    if task_type == "notebook":
-        dur_choice = questionary.select(
-            _S("How long do you need the GPU session?"),
-            choices=["2 hours", "4 hours", "6 hours (Recommended)", "8 hours"],
-            default="6 hours (Recommended)",
-            style=_STYLE,
-        ).ask()
-        if dur_choice is None:
-            return
-        nb_hours = int(dur_choice.split()[0])
-        nb_time_limit = f"{nb_hours:02d}:00:00"
-
-        port_str = questionary.text(
-            _S("JupyterLab port (on the GPU node):"), default="8888", style=_STYLE
-        ).ask()
-        if port_str is None:
-            return
-        try:
-            nb_port = max(1024, min(65535, int(port_str.strip())))
-        except ValueError:
-            nb_port = 8888
-
-        # Optionally pre-install deps so the interactive session starts ready
-        # (no notebook selected here, so no auto-detect — choose a file or type).
-        info("Tip: install your project's deps now so cells don't fail on import.")
-        nb_requirements, nb_packages = _notebook_deps_prompt(
-            "", _browse_jail, _user_browse_start(),
-            question="Optional — Pre-install packages for this session?",
-        )
-
-        spec = JobSpec(
-            job_name=job_name,
-            partition="gpu",
-            gpu_shards=defaults.gpu_shards,
-            cpus=defaults.cpus,
-            mem_gb=defaults.mem_gb,
-            time_limit=nb_time_limit,
-            run_command="",
-            task_type=task_type,
-            conda_env=chosen_env.path if chosen_env and chosen_env.kind == "conda" else "",
-            venv_path=chosen_env.path if chosen_env and chosen_env.kind == "venv" else "",
-            container_image=chosen_container,
-        )
-        # Auto-populate SLURM mail directive from users.db if an MTA is available.
-        from iitgpu.notify import mta_present
-        from iitgpu import daemonclient
-        if mta_present():
-            _registered_email = daemonclient.email_for(user)
-            if _registered_email:
-                spec.mail_user = _registered_email
         folder = make_job_folder(jdir, spec)
         (Path(folder) / ".iit-jupyter").write_text("")  # marks this job as a JupyterLab session
-        from iitgpu.jobs import render_notebook_sbatch
         script_text = render_notebook_sbatch(
-            spec, folder, port=nb_port,
+            spec, folder, port=ls.port,
             gateway_host=cfg.gateway_host, gateway_port=int(cfg.gateway_port),
-            requirements=nb_requirements, packages=nb_packages,
+            requirements=ls.requirements, packages=ls.packages,
         )
-        from iitgpu.jobs import gpu_share_note
         info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
+        _vram_check(task_type)
         panel("Generated notebook sbatch script", script_text)
 
-        if not _vram_check(task_type):
-            shutil.rmtree(folder, ignore_errors=True)
-            info("Submission cancelled.")
-            return
-
-        action = questionary.select(
-            "What would you like to do?",
-            choices=["Submit notebook job", "Discard"],
-            style=_STYLE,
-        ).ask()
-        if action is None or action == "Discard":
+        if not questionary.confirm(
+            "Launch this JupyterLab session?", default=True, style=_STYLE
+        ).ask():
             shutil.rmtree(folder, ignore_errors=True)
             info("Discarded.")
             return
@@ -983,7 +793,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
 
         success, result = submit_job(sbatch_path)
         if success:
-            ok(f"Notebook job submitted! ID: {result}  ({nb_hours}h session)")
+            ok(f"Notebook job submitted! ID: {result}  ({ls.time_limit} session)")
             auditclient.log("notebook_submitted_ok", detail=job_name, job_id=result)
             auditclient.log(
                 "notebook_session_start",
@@ -1006,220 +816,39 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             auditclient.log("notebook_submit_failed", detail=result)
         return
 
-    # Non-notebook: show script browser if not already set from inline paste
-    if script_path is None:
-        _start = _user_browse_start()
-        _prefill_sp = _tdefaults.get("script_path", "")
-        if _prefill_sp and Path(_prefill_sp).exists() and _browse_jail(_prefill_sp):
-            _start = str(Path(_prefill_sp).parent)
-
-        info(_S("Select your script (.py or .sh):"))
-        script_path = _browse_script(_start, _browse_jail)
-        if script_path is None:
-            return
-
-    # ── Step 5b: Training config (train_cifar10.py special-case) ─────────────
-    training_flags = ""
-    if script_path and Path(script_path).name == "train_cifar10.py":
-        model_sel = questionary.select(
-            "Model:",
-            choices=[
-                "SmallResNet    — fast    (~2 min / 50 epochs, 0.6 GB VRAM, ~93-95% acc)",
-                "WideResNet-28-10 — accurate (~14 min / 50 epochs, 26 GB VRAM, ~95-96% acc)",
-            ],
-            style=_STYLE,
-        ).ask()
-        if model_sel is None:
-            return
-        if "WideResNet" in model_sel:
-            training_flags += " --model wideres"
-
-        epochs_str = questionary.text("Epochs:", default="50", style=_STYLE).ask()
-        if epochs_str is None:
-            return
-        try:
-            ep = max(1, int(epochs_str.strip()))
-            if ep != 50:
-                training_flags += f" --epochs {ep}"
-        except ValueError:
-            pass
-
-    # ── Step 6: Arguments ─────────────────────────────────────────────────────
-    from iitgpu.validate import clean_array_spec, clean_dependency
-    args = ""
-    _prefill_args = _tdefaults.get("extra_args", "")
-    raw_args = questionary.text(
-        _S("Extra arguments (blank = none):")
-        + (_prefill_hint if _prefill_args else ""),
-        default=_prefill_args,
-        style=_STYLE,
-    ).ask()
-    if raw_args is None:
-        return
-    args = clean_run_command(raw_args) if raw_args.strip() else ""
-
-    # ── Job array (optional) ──────────────────────────────────────────────────
-    array_spec = ""
-    _prefill_array = _tdefaults.get("array", "")
-    if questionary.confirm(
-        "Advanced (optional) — Job array / parameter sweep?",
-        default=bool(_prefill_array), style=_STYLE,
-    ).ask():
-        raw = questionary.text(
-            "Array spec (e.g. 0-9 or 1-100%4):",
-            default=_prefill_array,
-            style=_STYLE,
-        ).ask()
-        cleaned = clean_array_spec(raw or "")
-        if cleaned:
-            array_spec = cleaned
-            info("Array tasks expose $SLURM_ARRAY_TASK_ID; use it to index your sweep.")
-        elif raw:
-            warn("Invalid array spec — ignoring.")
-
-    # ── Dependency (optional) ─────────────────────────────────────────────────
-    dependency = ""
-    _prefill_dep = _tdefaults.get("dependency", "")
-    if questionary.confirm(
-        "Advanced (optional) — Wait for another job first?",
-        default=bool(_prefill_dep), style=_STYLE,
-    ).ask():
-        from iitgpu.slurm import queue as _q
-        myjobs = _q()
-        if myjobs:
-            choices = [f"{e.job_id}  {e.name}  [{e.state}]" for e in myjobs] + ["[enter ID manually]"]
-            sel = questionary.select(
-                "Run after which job (on success)?", choices=choices, style=_STYLE
-            ).ask()
-            parent = (
-                sel.split()[0] if sel and sel != "[enter ID manually]"
-                else (questionary.text("Parent job ID:", style=_STYLE).ask() or "")
-            )
-        else:
-            parent = questionary.text("Parent job ID:", style=_STYLE).ask() or ""
-        dep = (
-            clean_dependency(f"afterok:{parent.strip()}")
-            if parent.strip().isdigit() else None
-        )
-        if dep:
-            dependency = dep
-        elif parent:
-            warn("Invalid parent job ID — ignoring dependency.")
-
-    # ── Build job spec ────────────────────────────────────────────────────────
-    if script_path and script_path.endswith(".py"):
-        run_cmd = f"python {script_path}"
-    elif script_path:
-        run_cmd = f"bash {script_path}"
-    else:
-        run_cmd = ""
-    if training_flags:
-        run_cmd += training_flags
-    if args:
-        run_cmd += f" {args}"
-
-    spec = JobSpec(
-        job_name=job_name,
-        partition="gpu",
-        gpu_shards=defaults.gpu_shards,
-        cpus=defaults.cpus,
-        mem_gb=defaults.mem_gb,
-        time_limit=defaults.time_limit,
-        run_command=run_cmd,
-        task_type=task_type,
-        conda_env=chosen_env.path if chosen_env and chosen_env.kind == "conda" else "",
-        venv_path=chosen_env.path if chosen_env and chosen_env.kind == "venv" else "",
-        container_image=chosen_container,
-        array=array_spec,
-        dependency=dependency,
-        model_path=model_path,
-        data_path=data_path,
-    )
-
-    # Auto-populate SLURM mail directive from users.db if an MTA is available.
-    from iitgpu.notify import mta_present
-    from iitgpu import daemonclient
-    if mta_present():
-        _registered_email = daemonclient.email_for(user)
-        if _registered_email:
-            spec.mail_user = _registered_email
+    # ── Batch: a script or notebook, run to completion ───────────────────────
+    run_cmd = _build_run_command(ls)
+    spec = to_job_spec(ls, user=user, partition=cfg.partition,
+                       job_name=job_name, task_type=task_type, run_command=run_cmd)
+    if ls.mail:
+        from iitgpu.notify import mta_present
+        from iitgpu import daemonclient
+        if mta_present():
+            _registered_email = daemonclient.email_for(user)
+            if _registered_email:
+                spec.mail_user = _registered_email
 
     folder = make_job_folder(jdir, spec)
     script_text = render_sbatch(spec, folder)
 
-    # ── Preview summary ───────────────────────────────────────────────────────
-    _env_display = "none"
-    if chosen_env:
-        _env_display = f"{chosen_env.name}  ({chosen_env.kind})"
-    elif chosen_container:
-        _env_display = f"container: {Path(chosen_container).name}"
-
-    from iitgpu.jobs import gpu_share_note
-    summary_lines = (
+    _env_display = (spec.container_image or spec.conda_env or spec.venv_path
+                    or "none (system python)")
+    panel("Job Summary", (
         f"  GPU share  : {gpu_share_note(spec.gpu_shards)}\n"
-        f"  Data path  : {data_path or 'not set'}\n"
-        f"  Model path : {model_path or 'not set'}\n"
+        f"  Time limit : {spec.time_limit or 'no limit'}\n"
+        f"  Script     : {ls.script or '(none)'}\n"
         f"  Environment: {_env_display}\n"
-        f"  Script     : {script_path or '(none)'}"
-    )
-    panel("Job Summary", summary_lines)
+        f"  Data path  : {spec.data_path or 'not set'}\n"
+        f"  Model path : {spec.model_path or 'not set'}"
+    ))
     panel("Generated sbatch script", script_text)
+    _vram_check(task_type)
 
-    # ── VRAM check ────────────────────────────────────────────────────────────
-    if not _vram_check(task_type):
-        shutil.rmtree(folder, ignore_errors=True)
-        info("Submission cancelled.")
-        return
-
-    # ── Action ────────────────────────────────────────────────────────────────
-    action = questionary.select(
-        "What would you like to do?",
-        choices=[
-            "Submit job",
-            "Review & edit script, then submit",
-            "Bring your own .sbatch, then submit",
-            "Save as template + submit",
-            "Save template only",
-            "Discard",
-        ],
-        style=_STYLE,
-    ).ask()
-
-    if action is None or action == "Discard":
+    if not questionary.confirm("Submit this job?", default=True, style=_STYLE).ask():
         shutil.rmtree(folder, ignore_errors=True)
         info("Discarded.")
         return
 
-    if action in ("Save as template + submit", "Save template only"):
-        tname = questionary.text(
-            "Template name:", default=job_name, style=_STYLE
-        ).ask()
-        if tname and tname.strip():
-            from iitgpu.templates import save_template
-            if save_template(cfg, tname.strip(), spec):
-                ok(f"Template '{tname.strip()}' saved.")
-
-    if action == "Save template only":
-        auditclient.log("job_template_saved", detail=job_name)
-        return
-
-    # ── Tier 2: Review & edit script ─────────────────────────────────────────
-    if action == "Review & edit script, then submit":
-        script_text = _tier2_edit(script_text, user, cfg)
-        if script_text is None:
-            shutil.rmtree(folder, ignore_errors=True)
-            info("Discarded.")
-            return
-
-    # ── Tier 3: Bring your own .sbatch ────────────────────────────────────────
-    if action == "Bring your own .sbatch, then submit":
-        script_text = _tier3_own_script(user, cfg)
-        if script_text is None:
-            shutil.rmtree(folder, ignore_errors=True)
-            info("Discarded.")
-            return
-
-    # ── Submit ────────────────────────────────────────────────────────────────
     sbatch_path = str(Path(folder) / "job.sbatch")
     Path(sbatch_path).write_text(script_text)
     Path(sbatch_path).chmod(0o644)
