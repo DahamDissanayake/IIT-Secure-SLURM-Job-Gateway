@@ -27,13 +27,17 @@ for base in users jobs; do
         [ -d "$p" ] || continue
         [ -L "$p" ] && continue
         u=$(basename "$p")
-        if ! id -u "$u" >/dev/null 2>&1; then
-            echo "  skip $p (no account named $u)"
-            continue
+        if id -u "$u" >/dev/null 2>&1; then
+            chown "$u:$ADMIN_GROUP" "$p"
+            echo "  $p"
+        else
+            # Orphaned area (offboarded account). Keep the numeric owner for
+            # forensics, but the group and mode must still be corrected — the
+            # data is as private as any live user's.
+            chown ":$ADMIN_GROUP" "$p"
+            echo "  $p (orphan: no account '$u'; owner left as-is)"
         fi
-        chown "$u:$ADMIN_GROUP" "$p"
         chmod 2770 "$p"
-        echo "  $p"
     done
 done
 
