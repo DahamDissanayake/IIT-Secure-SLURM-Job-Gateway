@@ -52,12 +52,21 @@ def marker_path(folder: str) -> Path:
 
 
 def wait_ready(folder: str, is_alive: Callable[[], bool],
-               timeout: float = 90.0, poll: float = 2.0) -> str:
+               timeout: float = 90.0, poll: float = 2.0,
+               should_stop: Callable[[], bool] | None = None) -> str:
     """Wait for the job's readiness marker.
 
-    "ready"   — marker appeared
-    "gone"    — is_alive() went False first (job failed/cancelled/finished)
-    "timeout" — still alive but no marker within timeout
+    "ready"     — marker appeared
+    "gone"      — is_alive() went False first (job failed/cancelled/finished)
+    "timeout"   — still alive but no marker within timeout
+    "cancelled" — should_stop() returned True (caller asked to bail early)
+
+    *should_stop*, when given, is called once per iteration and stands in for
+    the sleep — it must itself block for roughly *poll* seconds and return
+    whether the wait should end early. This is how a caller makes the wait
+    interruptible (e.g. by a keypress) without this module knowing anything
+    about terminals: with should_stop=None the old plain time.sleep(poll)
+    behaviour is unchanged, so existing callers and tests are unaffected.
     """
     deadline = time.monotonic() + timeout
     mp = marker_path(folder)
@@ -68,4 +77,8 @@ def wait_ready(folder: str, is_alive: Callable[[], bool],
             return "gone"
         if time.monotonic() >= deadline:
             return "timeout"
-        time.sleep(poll)
+        if should_stop is not None:
+            if should_stop():
+                return "cancelled"
+        else:
+            time.sleep(poll)

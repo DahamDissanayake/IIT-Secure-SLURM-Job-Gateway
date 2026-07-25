@@ -69,3 +69,30 @@ def test_wait_ready_timeout_zero_still_checks_first_iteration(tmp_path):
     assert wait_ready(str(tmp_path), is_alive=lambda: False, timeout=0) == "gone"
     marker_path(str(tmp_path)).touch()
     assert wait_ready(str(tmp_path), is_alive=lambda: True, timeout=0) == "ready"
+
+
+def test_wait_ready_cancelled_by_should_stop(tmp_path):
+    """A caller can make the wait interruptible without this module knowing
+    anything about terminals — this is what stops a keypress-driven wait
+    from silently blocking with no way out."""
+    calls = []
+
+    def _stop():
+        calls.append(1)
+        return len(calls) >= 2
+
+    result = wait_ready(str(tmp_path), is_alive=lambda: True, timeout=90,
+                        should_stop=_stop)
+    assert result == "cancelled"
+    assert len(calls) == 2
+
+
+def test_wait_ready_without_should_stop_still_sleeps(tmp_path, monkeypatch):
+    """should_stop=None (the default) must not change existing behaviour —
+    still a plain timed sleep, no should_stop call at all."""
+    slept = []
+    monkeypatch.setattr("iitgpu.connect.time.sleep", lambda s: slept.append(s))
+    marker_path(str(tmp_path)).touch()
+    result = wait_ready(str(tmp_path), is_alive=lambda: True, timeout=90,
+                        poll=2.0, should_stop=None)
+    assert result == "ready"

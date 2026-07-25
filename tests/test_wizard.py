@@ -945,3 +945,29 @@ def test_run_wizard_applies_the_default_env_to_a_fresh_spec():
     import inspect
     src = inspect.getsource(wizard.run_wizard)
     assert "_apply_default_env(ls, cfg)" in src
+
+
+def test_post_submit_wait_is_interruptible_and_cannot_crash_the_session():
+    """A plain 90s time.sleep() loop with no terminal input handling once
+    swallowed 'q' and made Ctrl-C propagate as an uncaught KeyboardInterrupt,
+    crashing the whole TUI process — which is the user's login shell, so it
+    took the SSH session down with it. The wait must be wired through
+    should_stop, and any interrupt that slips past it must still be caught
+    rather than propagate out of this function."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    i = src.index("def _post_submit_notebook")
+    body = src[i:i + 2000]
+    assert "should_stop=" in body
+    assert "except KeyboardInterrupt" in body
+    assert '"cancelled"' in body
+
+
+def test_wait_or_keypress_returns_bool_without_a_tty(monkeypatch):
+    """Non-interactive contexts (piped input, CI) must degrade to a plain
+    sleep rather than raising, matching splash.py's established pattern."""
+    import sys
+    import iitgpu.wizard as W
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert W._wait_or_keypress(0.01) is False

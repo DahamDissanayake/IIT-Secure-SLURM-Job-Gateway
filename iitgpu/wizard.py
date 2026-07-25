@@ -288,11 +288,57 @@ def _vram_check() -> bool:
     return True
 
 
+def _wait_or_keypress(timeout: float) -> bool:
+    """Block for up to *timeout* seconds, or until any key is pressed.
+
+    Used as wait_ready's should_stop hook so a long wait never leaves the
+    terminal silently unresponsive — a plain time.sleep() loop here once
+    swallowed 'q' and Ctrl-C alike; an uncaught KeyboardInterrupt from the
+    latter crashed the whole TUI process, which is this user's login shell,
+    so it took the SSH session down with it. This makes any single keypress
+    an ordinary, ungraceful-free exit from the wait, and ui.py's outer catch
+    covers the remaining KeyboardInterrupt case (SSH-level signals, non-tty).
+    """
+    import select
+    import sys
+    import time
+    try:
+        import termios
+        import tty
+    except ImportError:
+        time.sleep(timeout)
+        return False
+    if not sys.stdin.isatty():
+        time.sleep(timeout)
+        return False
+    old_settings = None
+    try:
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if ready:
+            sys.stdin.read(1)
+            return True
+        return False
+    except (termios.error, OSError):
+        time.sleep(timeout)
+        return False
+    finally:
+        if old_settings is not None:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            except termios.error:
+                pass
+
+
 def _post_submit_notebook(job_id: str, folder: str) -> None:
     """Wait for the job's readiness marker, then show the Connect card.
 
     The card is parsed from the job's own stdout — the authoritative source —
-    so it cannot disagree with what the server actually bound.
+    so it cannot disagree with what the server actually bound. The wait is
+    interruptible by any keypress (see _wait_or_keypress) and additionally
+    guarded by a bare KeyboardInterrupt catch, so this can never crash the
+    session even if the terminal isn't in a state where a keypress is caught.
     """
     import time
     from iitgpu.connect import parse_connect, render_card, wait_ready
@@ -308,7 +354,17 @@ def _post_submit_notebook(job_id: str, folder: str) -> None:
         return outs[-1].read_text() if outs else ""
 
     info("Starting JupyterLab… (this can take a minute on first launch)")
-    state = wait_ready(folder, is_alive=_alive, timeout=90)
+    info("Press any key to stop waiting — the job keeps running either way.")
+    try:
+        state = wait_ready(folder, is_alive=_alive, timeout=90,
+                           should_stop=lambda: _wait_or_keypress(2.0))
+    except KeyboardInterrupt:
+        state = "cancelled"
+
+    if state == "cancelled":
+        info("Stopped waiting — the job is still starting in the background.")
+        info("Check the dashboard (option 3) or press T on the job there for the Connect card.")
+        return
 
     if state == "ready":
         # NFS close-to-open: the readiness marker can be visible slightly
