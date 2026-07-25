@@ -844,3 +844,57 @@ def test_other_template_cancel_returns_to_the_intent_list(monkeypatch):
 
     intent_asked = [q for q in questions if q.startswith("What do you want to do?")]
     assert len(intent_asked) == 2, f"intent list should come back. Asked: {questions}"
+
+
+# ── Final whole-branch review: I4 (sbatch preview) and I2 (default env) ──────
+
+class _Cfg:
+    """Minimal config stand-in for the two helpers under test."""
+    def __init__(self, nfs_root, partition="gpu",
+                 gateway_host="gw.example", gateway_port="22"):
+        self.nfs_root = str(nfs_root)
+        self.partition = partition
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
+
+
+def test_preview_round_trips_a_batch_spec(tmp_path):
+    """I4: "view generated sbatch" now renders through the same to_job_spec +
+    renderer + run-command builder the submit path uses."""
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/train.py"
+    ls.args = "--epochs 3"
+    text = wizard._preview_sbatch(ls, _Cfg(tmp_path), "u")
+    assert "#SBATCH" in text
+    assert "train.py" in text
+    assert "python3 /shared/users/u/train.py --epochs 3" in text
+
+
+def test_preview_round_trips_a_notebook_spec(tmp_path):
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("notebook")
+    ls.conda_env = "/shared/envs/data-science"
+    text = wizard._preview_sbatch(ls, _Cfg(tmp_path), "u")
+    assert "#SBATCH" in text
+    assert "jupyter lab" in text
+    assert "conda activate /shared/envs/data-science" in text
+
+
+def test_preview_writes_nothing_to_disk(tmp_path):
+    """Display only — the real job folder is assigned at submit."""
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/train.py"
+    text = wizard._preview_sbatch(ls, _Cfg(tmp_path), "u")
+    assert "<job-folder-assigned-at-submit>" in text
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_run_wizard_hands_the_preview_to_the_hub():
+    import inspect
+    src = inspect.getsource(wizard.run_wizard)
+    assert "preview=" in src and "_hub_preview" in src

@@ -437,6 +437,31 @@ def _build_run_command(ls: LaunchSpec) -> str:
     return f"{cmd} {args}".rstrip() if args else cmd
 
 
+def _preview_sbatch(ls: LaunchSpec, cfg, user: str) -> str:
+    """Render the job script this spec would produce, for the hub's Advanced →
+    "view generated sbatch". Display only: no folder is created and nothing is
+    written, so the real folder name is a placeholder.
+
+    Uses the same to_job_spec + renderer + `_build_run_command` the submit paths
+    use, so what the user reads here is what will actually be submitted.
+    """
+    folder = "<job-folder-assigned-at-submit>"
+    job_name = _job_name_for(ls)
+    task_type = _task_type_for(ls)
+    if ls.intent == "notebook":
+        spec = to_job_spec(ls, user=user, partition=cfg.partition,
+                           job_name=job_name, task_type=task_type)
+        return render_notebook_sbatch(
+            spec, folder, port=ls.port,
+            gateway_host=cfg.gateway_host, gateway_port=int(cfg.gateway_port),
+            requirements=ls.requirements, packages=ls.packages,
+        )
+    spec = to_job_spec(ls, user=user, partition=cfg.partition,
+                       job_name=job_name, task_type=task_type,
+                       run_command=_build_run_command(ls))
+    return render_sbatch(spec, folder)
+
+
 def _task_type_for(ls: LaunchSpec) -> str:
     """Internal task_type for the audit trail (not a question the user answers)."""
     if ls.intent == "batch" and ls.script.endswith(".ipynb"):
@@ -618,9 +643,13 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             question="Optional — Pre-install packages for this session?",
         )
 
+    def _hub_preview(spec: LaunchSpec) -> str:
+        return _preview_sbatch(spec, cfg, user)
+
     while True:
         outcome = run_hub(ls, cfg, user, browse_script=_hub_browse_script,
-                          browse_data=_hub_browse_data, deps_prompt=_hub_deps)
+                          browse_data=_hub_browse_data, deps_prompt=_hub_deps,
+                          preview=None if ls.intent == "shell" else _hub_preview)
         if outcome is None:
             info("Cancelled.")
             return

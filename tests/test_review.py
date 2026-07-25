@@ -419,3 +419,55 @@ def test_advanced_keeps_array_and_dependency_for_a_batch_job(monkeypatch):
     R._edit_advanced(default_spec("batch"))
     joined = " ".join(seen["choices"])
     assert "job array" in joined and "run after job" in joined
+
+
+def test_view_generated_sbatch_prints_the_script(monkeypatch, capsys):
+    """I4: the menu item used to print a promise and show nothing."""
+    import iitgpu.review as R
+
+    answers = ["view generated sbatch", "back"]
+
+    def _sel(question, choices=None, **kw):
+        return type("A", (), {"ask": lambda self: answers.pop(0)})()
+
+    monkeypatch.setattr(R.questionary, "select", _sel)
+    R._edit_advanced(default_spec("batch"),
+                     lambda ls: "#!/bin/bash\n#SBATCH --job-name=demo\npython3 x.py\n")
+    out = capsys.readouterr().out
+    assert "#SBATCH --job-name=demo" in out
+
+
+def test_view_generated_sbatch_without_a_preview_says_so(monkeypatch, capsys):
+    import iitgpu.review as R
+
+    answers = ["view generated sbatch", "back"]
+
+    def _sel(question, choices=None, **kw):
+        return type("A", (), {"ask": lambda self: answers.pop(0)})()
+
+    monkeypatch.setattr(R.questionary, "select", _sel)
+    R._edit_advanced(default_spec("batch"), None)
+    out = capsys.readouterr().out
+    assert "No sbatch preview is available" in out
+    assert "after Launch builds it" not in out
+
+
+def test_run_hub_passes_the_preview_through_to_advanced(monkeypatch):
+    """The callback must actually reach _edit_advanced — the wiring, not the menu."""
+    import iitgpu.review as R
+
+    got = {}
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    monkeypatch.setattr(R, "_edit_advanced",
+                        lambda ls, preview=None: got.setdefault("preview", preview))
+    answers = ["Advanced…", "Cancel"]
+    monkeypatch.setattr(R.questionary, "select", lambda *a, **kw: type(
+        "A", (), {"ask": lambda self: answers.pop(0)})())
+
+    def _preview(ls):
+        return "#SBATCH"
+
+    ls = default_spec("batch"); ls.script = "/x/y.py"
+    R.run_hub(ls, None, "u", browse_script=lambda: None,
+              browse_data=lambda: None, preview=_preview)
+    assert got["preview"] is _preview

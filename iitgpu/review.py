@@ -222,7 +222,7 @@ def _edit_args(ls: LaunchSpec) -> None:
         ls.args = clean_run_command(raw) if raw.strip() else ""
 
 
-def _edit_advanced(ls: LaunchSpec) -> None:
+def _edit_advanced(ls: LaunchSpec, preview=None) -> None:
     from iitgpu.validate import clean_array_spec, clean_dependency
     while True:
         opts = []
@@ -248,8 +248,21 @@ def _edit_advanced(ls: LaunchSpec) -> None:
         elif sel.startswith("email"):
             ls.mail = not ls.mail
         elif sel.startswith("view generated"):
-            info("The final script is shown here after Launch builds it; "
-                 "fields above fully determine it.")
+            if preview is None:
+                # No renderer was wired in for this launch (a shell allocation
+                # has no sbatch at all) — say so instead of promising a script
+                # that never appears.
+                info("No sbatch preview is available here — this launch does "
+                     "not generate a job script.")
+                continue
+            try:
+                text = preview(ls)
+            except Exception as exc:      # a preview must never sink the wizard
+                warn(f"Could not build the preview: {exc}")
+                continue
+            console.print(Panel(escape(text), title="[bold] Generated sbatch "
+                                "(preview — folder assigned at submit) [/bold]",
+                                border_style="cyan"))
 
 
 _HUB_CHOICES = ["🚀 Launch", "Change script", "Change size", "Change time limit",
@@ -258,8 +271,13 @@ _HUB_CHOICES = ["🚀 Launch", "Change script", "Change size", "Change time limi
 
 
 def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
-            deps_prompt=None) -> str | None:
-    """Loop until Launch / Save as template / Cancel. Mutates ls in place."""
+            deps_prompt=None, preview=None) -> str | None:
+    """Loop until Launch / Save as template / Cancel. Mutates ls in place.
+
+    *preview* is an optional `LaunchSpec -> str` renderer for the Advanced menu's
+    "view generated sbatch". It is injected rather than imported so review.py
+    keeps knowing nothing about wizard.py (the import cycle Task 6 removed).
+    """
     while True:
         stats = None
         try:
@@ -304,4 +322,4 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
         elif sel == "Change args":
             _edit_args(ls)
         elif sel == "Advanced…":
-            _edit_advanced(ls)
+            _edit_advanced(ls, preview)
