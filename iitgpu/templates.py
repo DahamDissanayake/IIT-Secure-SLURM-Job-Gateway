@@ -8,7 +8,7 @@ import questionary
 from questionary import Style
 
 from iitgpu import auditclient
-from iitgpu.config import Config, templates_dir
+from iitgpu.config import Config, make_shared_writable, templates_dir
 from iitgpu.jobs import JobSpec
 from iitgpu.ui import err, header, info, ok, warn
 
