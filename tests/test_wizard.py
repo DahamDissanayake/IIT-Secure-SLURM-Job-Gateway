@@ -696,3 +696,78 @@ def test_notebook_post_submit_waits_and_shows_connect_card():
     body = src[i:i + 2500]
     assert "wait_ready" in body and "parse_connect" in body and "render_card" in body
     assert "gone" in body and "timeout" in body  # both failure states handled
+
+
+def test_post_submit_ready_shows_card(monkeypatch, tmp_path):
+    """When the job is ready and its .out already parses, show the Connect card
+    built from the job's own output — not a reconstructed tunnel hint."""
+    from rich.console import Console
+    import iitgpu.connect as connect
+    import iitgpu.ui as ui
+    from iitgpu.wizard import _post_submit_notebook
+
+    sample_out = (
+        "=================================================\n"
+        "JupyterLab is starting on the GPU node.\n"
+        "Token: bc123979da0269048efef70ff6bfb8fffdbb2ef71827937f\n"
+        "SSH tunnel — open a NEW terminal on YOUR LAPTOP and run:\n"
+        "  ssh -p 2225 -N -L 8930:192.168.122.1:8930 yenuli@10.35.4.100\n"
+        "  (-N = tunnel only, no shell opens — terminal sitting idle is correct)\n"
+        "Then open in browser: http://127.0.0.1:8930/lab?token="
+        "bc123979da0269048efef70ff6bfb8fffdbb2ef71827937f\n"
+        "=================================================\n"
+    )
+    (tmp_path / "slurm-1.out").write_text(sample_out)
+
+    monkeypatch.setattr(connect, "wait_ready", lambda *a, **kw: "ready")
+    test_console = Console(record=True, force_terminal=True, width=120)
+    monkeypatch.setattr(ui, "console", test_console)
+
+    _post_submit_notebook("123", str(tmp_path))
+
+    rendered = test_console.export_text()
+    assert "ssh -p 2225 -N -L 8930:192.168.122.1:8930 yenuli@10.35.4.100" in rendered
+
+
+def test_post_submit_ready_race_never_says_still_starting(monkeypatch, tmp_path):
+    """A ready job whose .out hasn't flushed the connect block yet must never
+    be reported as 'still starting' — that's factually wrong. It must point
+    the user at the dashboard's Connect card instead."""
+    from rich.console import Console
+    import iitgpu.connect as connect
+    import iitgpu.ui as ui
+    from iitgpu.wizard import _post_submit_notebook
+
+    (tmp_path / "slurm-1.out").write_text("JupyterLab is starting on the GPU node.\n")
+
+    monkeypatch.setattr(connect, "wait_ready", lambda *a, **kw: "ready")
+    monkeypatch.setattr("time.sleep", lambda *a, **kw: None)
+    test_console = Console(record=True, force_terminal=True, width=120)
+    monkeypatch.setattr(ui, "console", test_console)
+
+    _post_submit_notebook("123", str(tmp_path))
+
+    rendered = test_console.export_text()
+    assert "Still starting" not in rendered
+    assert "T" in rendered and "dashboard" in rendered.lower()
+
+
+def test_post_submit_gone_tails_stderr(monkeypatch, tmp_path):
+    """Crash output lands in .err (the launcher is un-redirected there), so a
+    'gone' state must tail .err, not just .out."""
+    from rich.console import Console
+    import iitgpu.connect as connect
+    import iitgpu.ui as ui
+    from iitgpu.wizard import _post_submit_notebook
+
+    (tmp_path / "slurm-1.out").write_text("")
+    (tmp_path / "slurm-1.err").write_text("ERROR: JupyterLab is missing\n")
+
+    monkeypatch.setattr(connect, "wait_ready", lambda *a, **kw: "gone")
+    test_console = Console(record=True, force_terminal=True, width=120)
+    monkeypatch.setattr(ui, "console", test_console)
+
+    _post_submit_notebook("123", str(tmp_path))
+
+    rendered = test_console.export_text()
+    assert "ERROR: JupyterLab is missing" in rendered

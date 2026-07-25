@@ -484,6 +484,7 @@ def _post_submit_notebook(job_id: str, folder: str) -> None:
     The card is parsed from the job's own stdout — the authoritative source —
     so it cannot disagree with what the server actually bound.
     """
+    import time
     from iitgpu.connect import parse_connect, render_card, wait_ready
     from iitgpu.slurm import queue as _q
     from iitgpu.ui import console as _con
@@ -492,20 +493,50 @@ def _post_submit_notebook(job_id: str, folder: str) -> None:
         return any(e.job_id == str(job_id) and e.state in ("PENDING", "RUNNING")
                    for e in _q(all_users=True))
 
+    def _read_out() -> str:
+        outs = sorted(Path(folder).glob("slurm-*.out"))
+        return outs[-1].read_text() if outs else ""
+
     info("Starting JupyterLab… (this can take a minute on first launch)")
     state = wait_ready(folder, is_alive=_alive, timeout=90)
-    outs = sorted(Path(folder).glob("slurm-*.out"))
-    out_text = outs[-1].read_text() if outs else ""
-    cinfo = parse_connect(out_text)
-    if state == "ready" and cinfo:
-        _con.print(render_card(cinfo))
+
+    if state == "ready":
+        # NFS close-to-open: the readiness marker can be visible slightly
+        # before the .out write is flushed. Retry the parse briefly rather
+        # than reporting a job that IS ready as "still starting".
+        cinfo = parse_connect(_read_out())
+        for _ in range(5):
+            if cinfo:
+                break
+            time.sleep(1)
+            cinfo = parse_connect(_read_out())
+        if cinfo:
+            _con.print(render_card(cinfo))
+        else:
+            warn("JupyterLab is up, but its connection info has not appeared in the job log yet.")
+            info("Open the dashboard and press T on the job for the Connect card.")
         return
+
     if state == "gone":
-        err("The job ended before JupyterLab came up. Last output:")
-        for line in out_text.splitlines()[-15:]:
-            info(f"  {line}")
+        out_text = _read_out()
+        errs = sorted(Path(folder).glob("slurm-*.err"))
+        err_text = errs[-1].read_text() if errs else ""
+        err("The job ended before JupyterLab came up.")
+        if out_text.strip():
+            info("Last output (.out):")
+            for line in out_text.splitlines()[-10:]:
+                info(f"  {line}")
+        if err_text.strip():
+            info("Last output (.err):")
+            for line in err_text.splitlines()[-15:]:
+                info(f"  {line}")
+        if not out_text.strip() and not err_text.strip():
+            info("No output was produced — the job may have failed before starting; check the dashboard.")
         return
+
+    # state == "timeout"
     warn("Still starting after 90s (large envs can be slow).")
+    cinfo = parse_connect(_read_out())
     if cinfo:
         _con.print(render_card(cinfo))
         info("The tunnel may not answer until the dashboard shows RUNNING.")
