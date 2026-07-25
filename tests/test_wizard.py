@@ -673,3 +673,14 @@ def test_vram_prompt_states_the_budget_is_shared_and_unenforced():
     body = src[start:start + 3000]
     assert "shared" in body.lower(), "prompt must say VRAM is shared"
     assert "not enforced" in body.lower(), "prompt must say it is not enforced"
+
+
+def test_notebook_submit_audits_the_interactive_session():
+    """A notebook is a full execution environment; the trail must show it started."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "notebook_session_start" in src
+    idx = src.index("notebook_session_start")
+    window = src[idx - 200:idx + 300]
+    assert "gpu_shards" in window, "record the slice the session holds"
+    assert "job_id" in window, "record which job the session is"

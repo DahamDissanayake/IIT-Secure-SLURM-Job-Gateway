@@ -923,6 +923,13 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             info(f"  squeue --job {result}   (check state)  |  look at the job log for the tunnel line")
             info(f"  Tunnel shape:  ssh -p {cfg.gateway_port} -L <port>:<node-ip>:<port> {user}@{cfg.gateway_host}")
             auditclient.log("notebook_submitted_ok", detail=job_name, job_id=result)
+            auditclient.log(
+                "notebook_session_start",
+                detail=job_name,
+                job_id=result,
+                meta={"env": spec.conda_env or spec.container_image or "system",
+                      "gpu_shards": spec.gpu_shards},
+            )
             if questionary.confirm(
                 "Watch job output now for the tunnel command?", default=True, style=_STYLE
             ).ask():
