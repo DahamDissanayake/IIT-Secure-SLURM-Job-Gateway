@@ -12,10 +12,12 @@ SHARED_DIRS="${SHARED_DIRS:-data datasets envs models templates}"
 [ -d "$NFS_ROOT/users" ] || { echo "ERROR: $NFS_ROOT/users missing — wrong node?" >&2; exit 1; }
 getent group "$ADMIN_GROUP" >/dev/null || { echo "ERROR: group $ADMIN_GROUP missing" >&2; exit 1; }
 
-echo "== shared assets -> 2775 (group writable, other read-only)"
+echo "== shared assets -> 2775 (group writable, other read-only) -- top level only,"
+echo "   contents underneath are NOT touched (see check-shared-perms.sh header)"
 for d in $SHARED_DIRS; do
     p="$NFS_ROOT/$d"
     [ -d "$p" ] || continue
+    [ -L "$p" ] && continue
     chmod 2775 "$p"
     echo "  $p"
 done
