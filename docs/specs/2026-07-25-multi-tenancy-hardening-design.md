@@ -239,35 +239,49 @@ Drift detection lives in `redeploy-igm.sh`, which can only report because of
 is accessible to `other`, printing the exact remediation command to run on the
 GPU host.
 
-#### Addendum — ACLs are authoritative on this filesystem, not mode bits
+#### Addendum — a second, ACL-based layer, since mode bits alone can mislead
 
-Deployed after the above went live: on this NFS export, POSIX group
-permissions described above do **not** actually govern access — default
-ACLs do, and `stat`/mode bits give no indication of that. Verified live: a
-per-user area reporting `group=gpuadmins mode=660` had ACL entry
-`group::---` — the owning group had **no** access at all; only users named
-explicitly in the ACL could get in. setgid is also not inherited on this
-share (same `mkdir`, same non-admin user: a `2770` parent yields a `2770`
-child on `/tmp` but a `5770`/`1770` child, no setgid, on `/shared`), so no
-umask/chmod strategy reaches admin access here either. This is how
-`dahamadmin` and `indrajith` — real accounts in `gpuadmins` — were denied
-access that mode bits said they had.
+Deployed after the above went live: on this NFS export, `stat`/mode bits can
+misrepresent the real access picture once a directory carries an extended
+ACL. Verified live: a per-user area reporting `group=gpuadmins mode=660` had
+ACL entry `group::---` — the "group" column `stat`/`ls -l` show in that case
+is the ACL mask, not the literal `group::` permissions. This is how
+`dahamadmin` and `indrajith` — real accounts in `gpuadmins` — were briefly
+seen without access that mode bits said they had.
 
-Admin access is therefore delivered by an explicit ACL entry, applied to
-every per-user area:
+(A companion investigation initially concluded setgid inheritance was also
+broken on `/shared` — same `mkdir`, same non-admin user, a `2770` parent
+apparently yielding a `5770`/`1770` child with no setgid bit. That was a
+measurement artifact of this host's `mkdir` binary, uutils coreutils 0.8.0,
+which mishandles ACL-bearing parent directories. Re-checked against the raw
+syscall — `python3 -c "import os; os.mkdir(...)"` — setgid inherits
+normally here: a `2770 <user>:gpuadmins` parent yields `2770` children, and
+files written inside them pick up group `gpuadmins`, the same as on any
+other filesystem. See `iitgpu/jobs.py` `make_job_folder` for the live
+comparison. On this host, verify mode-bit behaviour with the raw syscall,
+not a coreutils binary — the same `mkdir` bug, `getfacl` fabricating ACLs
+over the NFS client mount, and a missing `stat --cached=never` have each
+produced a wrong answer here before.)
+
+Admin access is delivered by ordinary POSIX group bits (mode `2770`, group
+`gpuadmins`, setgid keeping that group on everything created inside) AND,
+as a second, independent layer, an explicit ACL entry applied to every
+per-user area:
 
 ```
 setfacl -R -m g:gpuadmins:rwX -m d:g:gpuadmins:rwx  /shared/users/<user>  /shared/jobs/<user>
 ```
 
 (`rwX`, capital X, so data files don't gain spurious `+x`.) The `d:` default
-entry is what makes this survive anything written into the area later —
-including job folders, which inherit it rather than any setgid/group
-mechanism. `deploy/fix-shared-perms.sh` applies this to existing areas,
-`deploy/iit-gpu-adduser.sh` applies it explicitly to new ones, and
-`deploy/check-shared-perms.sh` verifies the ACL entry is present (via
-`getfacl`, on the GPU host — see that script's header for why the check
-can't trust `getfacl` output from the login node).
+entry is what makes the ACL survive anything written into the area later,
+alongside setgid inheritance doing the equivalent job for the traditional
+group bits — including job folders, which inherit both. `deploy/fix-shared-perms.sh`
+applies this to existing areas, `deploy/iit-gpu-adduser.sh` applies it
+explicitly to new ones, and `deploy/check-shared-perms.sh` verifies the ACL
+entry is present (via `getfacl`, on the GPU host — see that script's header
+for why the check can't trust `getfacl` output from the login node) — mode
+bits alone are not sufficient evidence on this filesystem, since they can
+look correct while an ACL entry disagrees.
 
 ### P0-2 — Notebook jail
 

@@ -1,8 +1,14 @@
 # tests/test_permissions.py
 """Shared-state files must be writable by every gateway user.
 
-The cluster's NFS export uses root_squash and does not inherit setgid group
-permissions. ACLs do work on /shared -- deploy/fix-shared-perms.sh and
+The cluster's NFS export uses root_squash. setgid IS inherited normally on
+/shared (an earlier note here claimed otherwise; that was a measurement
+artifact of this host's `mkdir` binary -- uutils coreutils 0.8.0 --
+mishandling ACL-bearing parent directories, not a real filesystem
+limitation -- see iitgpu/jobs.py make_job_folder for the live comparison),
+but it only sets a new file's group to match its parent directory's owning
+group -- it doesn't grant write access to arbitrary gpuusers members outside
+that group. ACLs do work on /shared -- deploy/fix-shared-perms.sh and
 deploy/iit-gpu-adduser.sh apply a gpuadmins ACL to each user's own job/model
 directories -- but the installer has no equivalent per-file ACL step for
 shared registry/template files, so group-based sharing can't be set up for

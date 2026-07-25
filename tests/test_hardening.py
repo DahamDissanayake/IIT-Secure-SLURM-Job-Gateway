@@ -18,17 +18,24 @@ def test_make_job_folder_uses_0o2770(tmp_path):
     inside make_job_folder (chmod cannot grant setgid to a non-admin caller;
     see the comment on make_job_folder).
 
-    Production's /shared does NOT behave this way. It's ext4 with default
-    ACLs, and setgid does not survive there: jobs/<user> is provisioned 2770
-    by iit-gpu-adduser.sh, but a folder mkdir'd inside it comes out 1770 (or
-    5770 under users/<user>), setgid bit gone. Admin access to files inside
-    real job folders comes from the gpuadmins ACL (group:gpuadmins:rwx +
-    default:group:gpuadmins:rwx, applied by deploy/fix-shared-perms.sh and
-    deploy/iit-gpu-adduser.sh), not from setgid inheritance.
+    Production's /shared behaves the same way: jobs/<user> is provisioned
+    2770 owner:gpuadmins by iit-gpu-adduser.sh, and a folder mkdir'd inside
+    it (via the raw os.mkdir syscall, which is what Path.mkdir uses) comes
+    out 2770 too, with files written inside it inheriting group gpuadmins.
+    (An earlier version of this docstring claimed production /shared does
+    NOT inherit setgid; that was a measurement artifact of this host's
+    `mkdir` binary -- uutils coreutils 0.8.0 -- mishandling ACL-bearing
+    parent directories. Re-checked against the raw syscall, setgid inherits
+    fine. On this host, verify mode-bit behaviour with `python3 -c "import
+    os; os.mkdir(...)"`, not with coreutils binaries.) The gpuadmins ACL
+    applied by deploy/fix-shared-perms.sh and deploy/iit-gpu-adduser.sh is a
+    second, independent layer on top of this, and is what
+    deploy/check-shared-perms.sh verifies -- useful because mode bits alone
+    can look correct while an ACL entry disagrees.
 
-    So this test pins make_job_folder's own behaviour -- given a setgid
-    parent, it does not chmod the setgid bit away -- not the mode production
-    job folders actually end up with."""
+    This test pins make_job_folder's own behaviour -- given a setgid
+    parent, it does not chmod the setgid bit away -- which also matches
+    what production job folders actually end up with."""
     from iitgpu.jobs import JobSpec, make_job_folder
 
     user_dir = tmp_path / "sec_test"
@@ -153,13 +160,14 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
 
     Like test_make_job_folder_uses_0o2770, this test sets up a setgid (2770)
     parent so it can assert that the folder's pre-existing 2770 mode survives
-    a failed chown. That setgid-inheriting setup is a property of the test
-    filesystem, not of production /shared: there, jobs/<user> is 2770 but a
-    folder mkdir'd inside it does not inherit setgid (it comes out 1770, or
-    5770 under users/<user>), and admin access comes from the gpuadmins ACL
-    rather than setgid. What this test actually proves is that
-    make_job_folder never strips or downgrades a folder's existing mode just
-    because os.chown failed -- not that production job folders end up 2770."""
+    a failed chown. That setgid-inheriting setup also matches production
+    /shared: jobs/<user> is 2770 owner:gpuadmins, and setgid is inherited
+    normally there too (checked against the raw os.mkdir syscall -- an
+    earlier version of this docstring claimed otherwise, based on a
+    measurement using this host's `mkdir` binary, uutils coreutils 0.8.0,
+    which mishandles ACL-bearing parent directories). What this test
+    actually proves is that make_job_folder never strips or downgrades a
+    folder's existing mode just because os.chown failed."""
     from unittest.mock import patch
     from iitgpu.jobs import JobSpec, make_job_folder
 

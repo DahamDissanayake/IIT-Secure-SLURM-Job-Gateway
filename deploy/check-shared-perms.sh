@@ -2,17 +2,27 @@
 # Read-only audit of /shared access. Safe to run from any node — root_squash
 # blocks writes from the login node but stat() works fine.
 #
-# IMPORTANT — mode bits are not sufficient evidence on this filesystem. On
-# this NFS export, POSIX group permissions do NOT govern access; default
-# ACLs do, and `stat`/mode bits actively conceal that. Verified live: a
-# per-user area reporting `group=gpuadmins mode=660` had ACL entry
-# `group::---` -- the owning GROUP had NO access at all; only users named
-# explicitly in the ACL could get in. setgid is also not inherited on this
-# share, so a correct-looking `chown user:gpuadmins` + `chmod 2770` can still
-# leave admins locked out. A check that only reads mode bits therefore
-# cannot see this entire class of drift -- it must also confirm the
-# `gpuadmins` ACL entry is actually present (see the per-user-area loop
-# below). Treat mode bits as necessary but NOT sufficient.
+# IMPORTANT — mode bits are not sufficient evidence on this filesystem. A
+# per-user area is provisioned 2770 owner:gpuadmins, and setgid IS inherited
+# normally here, so `chown user:gpuadmins` + `chmod 2770` does grant the
+# admin group real access via ordinary POSIX group bits. (An earlier note
+# here claimed setgid inheritance was broken on this share; that was a
+# measurement artifact of this host's `mkdir` binary -- uutils coreutils
+# 0.8.0 -- mishandling ACL-bearing parent directories. Checked against the
+# raw syscall, `python3 -c "import os; os.mkdir(...)"`, setgid inherits
+# fine. See iitgpu/jobs.py make_job_folder for the live comparison. On this
+# host, verify mode-bit behaviour with a raw syscall, not a coreutils
+# binary.)
+#
+# Even so, `stat`/mode bits can mislead: once a directory carries an
+# extended ACL, the "group" column `stat`/`ls -l` show is the ACL mask, not
+# the literal group:: permissions. Verified live: a per-user area reporting
+# `group=gpuadmins mode=660` had ACL entry `group::---`. A check that only
+# reads mode bits therefore cannot see this class of drift -- it must also
+# confirm the `gpuadmins` ACL entry is actually present (see the
+# per-user-area loop below), as a second, independent layer on top of the
+# ordinary group permissions. Treat mode bits as necessary but NOT
+# sufficient.
 #
 # ACL verification only runs when this script executes on the GPU host (the
 # NFS server, where /mnt/nvme_storage/shared is a real local mount). Over
@@ -27,8 +37,9 @@
 #       Per-user areas (users/, jobs/) grant nothing to "other" -- checked at
 #       their own top level (each users/<u>, jobs/<u> directory itself) --
 #       AND, when run on the GPU host, must carry an explicit access +
-#       default ACL entry for $ADMIN_GROUP, since mode/group alone do not
-#       grant that access here.
+#       default ACL entry for $ADMIN_GROUP as a second, independent layer
+#       on top of mode/group -- mode bits alone can look correct while an
+#       ACL entry disagrees (see IMPORTANT above).
 #       Shared asset dirs grant no write to "other" -- checked at their TOP
 #       LEVEL ONLY (e.g. the envs/ directory entry itself). This does NOT
 #       recurse: files and subdirectories underneath a shared asset dir are
@@ -111,14 +122,15 @@ for base in users jobs; do
             echo "WRONGGROUP $d  group=$grp_name  (per-user areas must be group $ADMIN_GROUP)"
             fail=1
         fi
-        # Mode/group above can both look correct while $ADMIN_GROUP still has
-        # no real access -- on this filesystem ACLs are authoritative, not
-        # mode bits (see header). Confirm the access AND default ACL entries
-        # for $ADMIN_GROUP are actually present.
+        # Mode/group above grant $ADMIN_GROUP real access via ordinary POSIX
+        # group bits, but the ACL is a second, independent layer and mode
+        # bits alone are not sufficient evidence of it (see header). Confirm
+        # the access AND default ACL entries for $ADMIN_GROUP are actually
+        # present.
         if [ "$HAVE_GETFACL" -eq 1 ]; then
             facl=$(getfacl -p "$d" 2>/dev/null) || facl=""
             if ! printf '%s\n' "$facl" | grep -q "^group:${ADMIN_GROUP}:rwx"; then
-                echo "NOACL     $d  missing ACL entry group:${ADMIN_GROUP}:rwx (mode/group alone do not grant access on this filesystem)"
+                echo "NOACL     $d  missing ACL entry group:${ADMIN_GROUP}:rwx (second layer on top of mode/group; mode bits alone can look correct while this ACL entry disagrees)"
                 fail=1
             fi
             if ! printf '%s\n' "$facl" | grep -q "^default:group:${ADMIN_GROUP}:rwx"; then

@@ -138,18 +138,26 @@ ok "SLURM: $USERNAME → account=$SLURM_ACCOUNT qos=$SLURM_QOS"
 # $ADMIN_GROUP to fix it themselves — so their very first job becomes readable
 # and writable by every cluster user.
 step "Creating $NFS_ROOT/users/$USERNAME and $NFS_ROOT/jobs/$USERNAME on the NFS server (GPU host) ..."
-# chown/chmod alone are NOT sufficient on this filesystem: POSIX group
-# permissions do not govern access here, default ACLs do, and `stat` does
-# not show the difference (verified live: a dir reporting group=gpuadmins
-# mode=660 had ACL `group::---` -- the group had NO access). setgid is also
-# not inherited on this share, so there is no way to get admin access here
-# via mode bits alone. The explicit setfacl below (same as
-# deploy/fix-shared-perms.sh, which repairs existing areas) is what actually
-# grants $ADMIN_GROUP access, and the `d:` default entries make that survive
-# everything the new user creates afterward. Do not rely on inheritance from
-# the users/ and jobs/ parents alone -- it happens to work today because
-# those parents already carry the right default ACL, but a brand-new area
-# should not depend on that as its only line of defense.
+# The chmod above already grants $ADMIN_GROUP real access via ordinary POSIX
+# group bits: setgid is inherited normally on this filesystem (see the
+# comment at step 5 above), so a 2770 $ADMIN_GROUP directory here means
+# anything created inside picks up that group too. (An earlier note here
+# claimed setgid was not inherited on this share; that was a measurement
+# artifact of this host's `mkdir` binary -- uutils coreutils 0.8.0 --
+# mishandling ACL-bearing parent directories. Checked against the raw
+# syscall, setgid inherits fine -- see iitgpu/jobs.py make_job_folder for
+# the live comparison. On this host, verify mode-bit behaviour with a raw
+# syscall, not a coreutils binary.)
+#
+# The explicit setfacl below (same as deploy/fix-shared-perms.sh, which
+# repairs existing areas) adds a second, independent layer: `stat`/mode
+# bits can still mislead a reader once a directory carries an extended ACL
+# (verified live: a dir reporting group=gpuadmins mode=660 had ACL entry
+# `group::---`), so the ACL is what deploy/check-shared-perms.sh actually
+# verifies. The `d:` default entries make that survive everything the new
+# user creates afterward. Set it explicitly here rather than relying on
+# inheriting the users/ and jobs/ parents' own default ACL -- a brand-new
+# area should carry its own guarantee, not depend on the parent alone.
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/users/$USERNAME && \
     sudo chmod 2770 $NFS_ROOT/users/$USERNAME && \
