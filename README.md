@@ -250,24 +250,34 @@ Five sequential steps for first-time users:
 
 ### 3. Run a Job
 
-4-step wizard — resources are set automatically:
+Two questions, then one editable screen. The wizard opens with what you want to do, not with a taxonomy of job types:
 
-| Task type | GPUs | CPUs | Mem | Time limit |
-|-----------|------|------|-----|------------|
-| Train from scratch | 1 | 16 | 60 G | no limit |
-| Fine-tune a model | 1 | 16 | 60 G | no limit |
-| Run inference | 1 | 8 | 32 G | 04:00:00 |
-| Quick test | 1 | 4 | 16 G | 00:30:00 |
+| Intent | What it launches | GPU | CPUs | Mem | Time limit |
+|--------|------------------|-----|------|-----|------------|
+| **Open JupyterLab** | A JupyterLab session on the GPU node, reached over an SSH tunnel | ¼ | 8 | 14 G | 06:00:00 |
+| **Run a script or notebook** | A batch job (`.py`, `.sh` or `.ipynb`) | ¼ | 8 | 14 G | 04:00:00 |
+| **Open a shell on the GPU node** | An `srun --pty` allocation — a real shell on the node | ¼ | 4 | 8 G | 02:00:00 |
+| **Other** | Submit your own `.sbatch`, or load a saved template | — | — | — | — |
 
-Steps: **Task type** → **Environment** (from registry) → **Script** (jailed `.py`/`.sh` browser) → **Extra args** → sbatch preview → Submit / Save template / Discard.
+Only the batch intent asks a second question (which script), and only when it does not already have one. Everything else lands on the **review hub**: a single panel that shows exactly what will launch, with live GPU availability in its title, and a menu that edits any row in place:
 
-After submission, the user can watch live output immediately in the dashboard.
+- **Size** — Small (¼ GPU) / Standard (¼ GPU) / Whole GPU, each labelled *starts now* or *will queue* against the free slice count
+- **Time limit** — presets up to the 8 h cluster QOS maximum, or a custom `HH:MM` (rejected past 8 h, because `sbatch` would reject it too)
+- **Environment** — a prebuilt env from `/shared/envs/` (defaults to `data-science` when installed), your own conda env or venv, a jailed `.sif` container image, or system python
+- **Data / model** — jailed folder browser for data, path or HuggingFace repo id for a model *(batch jobs)*
+- **Python packages** — a `requirements.txt` or a package list, pip-installed before the first cell runs *(JupyterLab sessions and `.ipynb` jobs)*
+- **Args** — extra command-line arguments *(batch jobs)*
+- **Advanced** — job array, run-after-job dependency *(batch jobs)*, email notifications, and a preview of the generated sbatch
+
+The hub only shows rows the chosen intent actually uses: a shell allocation is size and time, because `srun --pty` carries nothing else. From there: **Launch**, **Save as template**, or **Cancel**.
+
+After submission, the user can watch live output immediately in the dashboard; a JupyterLab launch instead waits for the session to come up and prints the Connect card (tunnel command, URL and token).
 
 ### 4. Monitor
 
 Sub-menu with four options:
 
-- **Live dashboard** — Rich `Live` layout, auto-refreshes every 3 s. Shows job list + rolling last-20-lines of the selected job's output file. Keys: `Q` quit, `S` switch job, `C` cancel, `R` force refresh.
+- **Live dashboard** — Rich `Live` layout, auto-refreshes every 3 s. Shows job list + rolling last-20-lines of the selected job's output file. Keys: `Q` quit, `S` switch job, `C` cancel, `E` extend a JupyterLab session by 2 h, `R` force refresh, `T` show the Connect card for your JupyterLab job, `↑`/`↓` scroll the log, `PgUp`/`PgDn` jump.
 - **View my queue** — Prints current `squeue` output for the logged-in user.
 - **Cancel a job** — Prompts for job ID, calls `scancel`.
 - **View job log** — Jailed file browser to tail any `.out` file in `/shared/<user>/`.
@@ -355,7 +365,9 @@ iitgpu/
   upload.py         Jailed file/folder copy to /shared/<user>/data/
   setup.py          Setup wizard: health check → env → data → model → smoke test
   envbuilder.py     Conda env creation: framework picker → conda create + pip install
-  wizard.py         4-step job builder (task type → env → script → args)
+  wizard.py         Job builder: intent → intake → review hub → submit
+  launchspec.py     LaunchSpec dataclass + pure launch-flow logic (sizes, defaults)
+  review.py         The review hub: one editable pre-launch screen
   dashboard.py      Live dashboard: Rich Live layout, auto-refresh every 3 s
   shell.py          SLURM command shell: restricted input loop, audit-logged
   monitor.py        Queue view, job cancel, jailed log tail, cluster status
