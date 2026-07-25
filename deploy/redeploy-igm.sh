@@ -53,6 +53,13 @@ git merge --ff-only FETCH_HEAD 2>&1 \
     || fail "git merge --ff-only failed — the deployed clone has local commits or has diverged from '$SOURCE'. Resolve manually."
 ok "HEAD: $(git log --oneline -1)"
 
+step "Checking /shared permissions ..."
+if bash "$INSTALL/deploy/check-shared-perms.sh"; then
+    ok "shared permissions OK"
+else
+    fail "shared permission drift detected (see above). This node cannot repair it — the NFS export uses root_squash. Fix on the GPU host, then re-run this deploy."
+fi
+
 step "Running test suite ..."
 PYTHONPATH="$INSTALL" python3 -m pytest "$INSTALL/tests/" -q --tb=short \
     || fail "Tests failed — investigate before relying on this revision"
