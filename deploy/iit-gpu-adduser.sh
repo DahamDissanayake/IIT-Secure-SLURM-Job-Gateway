@@ -138,12 +138,26 @@ ok "SLURM: $USERNAME → account=$SLURM_ACCOUNT qos=$SLURM_QOS"
 # $ADMIN_GROUP to fix it themselves — so their very first job becomes readable
 # and writable by every cluster user.
 step "Creating $NFS_ROOT/users/$USERNAME and $NFS_ROOT/jobs/$USERNAME on the NFS server (GPU host) ..."
+# chown/chmod alone are NOT sufficient on this filesystem: POSIX group
+# permissions do not govern access here, default ACLs do, and `stat` does
+# not show the difference (verified live: a dir reporting group=gpuadmins
+# mode=660 had ACL `group::---` -- the group had NO access). setgid is also
+# not inherited on this share, so there is no way to get admin access here
+# via mode bits alone. The explicit setfacl below (same as
+# deploy/fix-shared-perms.sh, which repairs existing areas) is what actually
+# grants $ADMIN_GROUP access, and the `d:` default entries make that survive
+# everything the new user creates afterward. Do not rely on inheritance from
+# the users/ and jobs/ parents alone -- it happens to work today because
+# those parents already carry the right default ACL, but a brand-new area
+# should not depend on that as its only line of defense.
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/users/$USERNAME && \
     sudo chmod 2770 $NFS_ROOT/users/$USERNAME && \
+    sudo setfacl -R -m g:$ADMIN_GROUP:rwX -m d:g:$ADMIN_GROUP:rwx $NFS_ROOT/users/$USERNAME && \
     sudo mkdir -p $NFS_ROOT/jobs/$USERNAME && \
     sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/jobs/$USERNAME && \
-    sudo chmod 2770 $NFS_ROOT/jobs/$USERNAME\""
+    sudo chmod 2770 $NFS_ROOT/jobs/$USERNAME && \
+    sudo setfacl -R -m g:$ADMIN_GROUP:rwX -m d:g:$ADMIN_GROUP:rwx $NFS_ROOT/jobs/$USERNAME\""
 
 # Shell users get ~/shared → NFS root so they can reach datasets, models, envs,
 # AND their private area at ~/shared/users/<user> in one place.
