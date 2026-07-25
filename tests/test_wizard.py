@@ -898,3 +898,50 @@ def test_run_wizard_hands_the_preview_to_the_hub():
     import inspect
     src = inspect.getsource(wizard.run_wizard)
     assert "preview=" in src and "_hub_preview" in src
+
+
+def test_default_env_points_at_the_prebuilt_data_science_env(tmp_path):
+    """I2: default_spec leaves conda_env empty, which rendered as "(not set)"
+    and launched JupyterLab on system python for anyone who accepted the
+    defaults. The prebuilt env is now the default when it is installed."""
+    from iitgpu.launchspec import default_spec
+
+    (tmp_path / "envs" / "data-science").mkdir(parents=True)
+    for intent in ("notebook", "batch"):
+        ls = default_spec(intent)
+        wizard._apply_default_env(ls, _Cfg(tmp_path))
+        assert ls.conda_env == str(tmp_path / "envs" / "data-science")
+        assert ls.env_kind == "prebuilt"
+
+
+def test_default_env_is_left_empty_when_the_env_is_not_installed(tmp_path):
+    """Absent env must not error — the empty default is still a valid launch."""
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("notebook")
+    wizard._apply_default_env(ls, _Cfg(tmp_path))
+    assert ls.conda_env == ""
+
+
+def test_default_env_skips_a_shell_and_never_overwrites_a_choice(tmp_path):
+    from iitgpu.launchspec import default_spec
+
+    (tmp_path / "envs" / "data-science").mkdir(parents=True)
+
+    shell = default_spec("shell")          # renders no sbatch at all
+    wizard._apply_default_env(shell, _Cfg(tmp_path))
+    assert shell.conda_env == ""
+
+    from_template = default_spec("batch")  # already carries an environment
+    from_template.env_kind, from_template.venv_path = "venv", "/shared/users/u/.venv"
+    wizard._apply_default_env(from_template, _Cfg(tmp_path))
+    assert from_template.venv_path == "/shared/users/u/.venv"
+    assert from_template.conda_env == ""
+
+
+def test_run_wizard_applies_the_default_env_to_a_fresh_spec():
+    """Source-level, per the project's standing trade-off: the helper is wired
+    into the intent branch, not merely defined."""
+    import inspect
+    src = inspect.getsource(wizard.run_wizard)
+    assert "_apply_default_env(ls, cfg)" in src

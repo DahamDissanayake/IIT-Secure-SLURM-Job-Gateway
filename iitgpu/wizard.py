@@ -437,6 +437,31 @@ def _build_run_command(ls: LaunchSpec) -> str:
     return f"{cmd} {args}".rstrip() if args else cmd
 
 
+_DEFAULT_ENV_NAME = "data-science"
+
+
+def _apply_default_env(ls: LaunchSpec, cfg) -> None:
+    """Default a fresh launch to the shared prebuilt env when one is installed.
+
+    `default_spec` leaves conda_env empty, which the hub renders as "(not set)"
+    and the renderer turns into system python — so a user who accepted every
+    default got a JupyterLab session with no torch in it. The filesystem probe
+    lives here rather than in launchspec.default_spec so that module stays pure.
+    Absent env = no change: the empty default is still a valid launch.
+    """
+    if ls.intent not in ("notebook", "batch"):
+        return                      # a shell renders no sbatch — see review.py
+    if ls.conda_env or ls.venv_path or ls.container_image:
+        return                      # a template/rerun already said what to use
+    env = Path(getattr(cfg, "nfs_root", "/shared")) / "envs" / _DEFAULT_ENV_NAME
+    try:
+        present = env.is_dir()
+    except OSError:
+        present = False
+    if present:
+        ls.env_kind, ls.conda_env = "prebuilt", str(env)
+
+
 def _preview_sbatch(ls: LaunchSpec, cfg, user: str) -> str:
     """Render the job script this spec would produce, for the hub's Advanced →
     "view generated sbatch". Display only: no folder is created and nothing is
@@ -598,6 +623,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             if intent is None:
                 return
             ls = default_spec(intent)
+            _apply_default_env(ls, cfg)
             break
 
         sub = questionary.select(
