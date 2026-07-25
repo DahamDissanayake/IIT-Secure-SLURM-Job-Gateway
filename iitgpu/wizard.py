@@ -434,6 +434,12 @@ def _vram_check(task_type: str) -> bool:
         warn("Live GPU stats unavailable — VRAM check will be skipped.")
 
     default_vram = _VRAM_TASK_DEFAULTS.get(task_type, 0)
+    from iitgpu.jobs import SHARDS_PER_GPU
+    if free_gb is not None:
+        _slice_gb = (stats.gpu_mem_total_mb / 1024) / SHARDS_PER_GPU
+        info(f"Your slice's fair share is about {_slice_gb:.0f} GB. "
+             f"VRAM is shared between concurrent jobs and is not enforced, so "
+             f"this is a budget, not a guarantee — going over can OOM someone else.")
     raw = questionary.text(
         "Estimated VRAM your job needs (GB, 0 = skip check):",
         default=str(default_vram),

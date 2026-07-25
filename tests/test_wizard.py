@@ -663,3 +663,13 @@ def test_gpu_share_note_is_used_by_the_wizard():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
     assert "gpu_share_note" in src, "wizard must show the GPU share to the user"
+
+
+def test_vram_prompt_states_the_budget_is_shared_and_unenforced():
+    """Slices schedule, they do not isolate — two jobs can still OOM each other."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    start = src.index("def _vram_check")
+    body = src[start:start + 3000]
+    assert "shared" in body.lower(), "prompt must say VRAM is shared"
+    assert "not enforced" in body.lower(), "prompt must say it is not enforced"
