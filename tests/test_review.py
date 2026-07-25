@@ -342,3 +342,80 @@ def test_edit_time_accepts_just_under_the_maximum(monkeypatch):
     monkeypatch.setattr(R.questionary, "text", _Fixed("7:59"))
     R._edit_time(ls)
     assert ls.time_limit == "07:59:00"
+
+
+def test_hub_hides_every_no_op_row_for_a_shell(monkeypatch):
+    """I3: build_interactive_cmd() consumes partition/cpus/mem/gres/time and
+    nothing else, so environment, data/model and the whole Advanced menu were
+    fully-functional-looking rows the submit path threw away. Spec §1: a shell
+    is size + time."""
+    import iitgpu.review as R
+
+    seen = _captured_choices(monkeypatch, "Select:")
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    assert R.run_hub(default_spec("shell"), None, "u", browse_script=lambda: None,
+                     browse_data=lambda: None) is None
+
+    for gone in ("Change environment", "Change data / model", "Advanced…",
+                 "Change script", "Change args"):
+        assert gone not in seen["choices"], gone
+    assert seen["choices"] == ["🚀 Launch", "Change size", "Change time limit",
+                               "Save as template", "Cancel"]
+
+    panel = _plain(render_hub(default_spec("shell"), None))
+    for gone in ("Environment", "Data / model", "Advanced", "Args", "Script"):
+        assert gone not in panel, gone
+    assert "Size" in panel and "Time limit" in panel
+
+
+def test_hub_hides_data_model_for_a_session_but_keeps_env_and_packages(monkeypatch):
+    """I3: render_notebook_sbatch() never emits data_path/model_path, but it does
+    consume the environment and the pip-install block — so those stay, and the
+    packages question gets its own row instead of hiding behind Data / model."""
+    import iitgpu.review as R
+
+    seen = _captured_choices(monkeypatch, "Select:")
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    assert R.run_hub(default_spec("notebook"), None, "u", browse_script=lambda: None,
+                     browse_data=lambda: None, deps_prompt=lambda: ("", "")) is None
+
+    assert "Change data / model" not in seen["choices"]
+    assert "Change environment" in seen["choices"]
+    assert "Advanced…" in seen["choices"]
+    assert R._PKG_CHOICE in seen["choices"]
+
+    panel = _plain(render_hub(default_spec("notebook"), None))
+    assert "Data / model" not in panel
+    assert "Environment" in panel and "Packages" in panel and "Advanced" in panel
+
+
+def test_hub_keeps_every_row_for_a_batch_job(monkeypatch):
+    import iitgpu.review as R
+
+    seen = _captured_choices(monkeypatch, "Select:")
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/train.py"
+    assert R.run_hub(ls, None, "u", browse_script=lambda: None,
+                     browse_data=lambda: None) is None
+    assert seen["choices"] == R._HUB_CHOICES
+
+
+def test_advanced_hides_array_and_dependency_for_a_session(monkeypatch):
+    """I3: neither directive is rendered for a notebook job."""
+    import iitgpu.review as R
+
+    seen = _captured_choices(monkeypatch, "Advanced:")
+    R._edit_advanced(default_spec("notebook"))
+    joined = " ".join(seen["choices"])
+    assert "job array" not in joined and "run after job" not in joined
+    assert "email notifications" in joined and "view generated sbatch" in joined
+
+
+def test_advanced_keeps_array_and_dependency_for_a_batch_job(monkeypatch):
+    import iitgpu.review as R
+
+    seen = _captured_choices(monkeypatch, "Advanced:")
+    R._edit_advanced(default_spec("batch"))
+    joined = " ".join(seen["choices"])
+    assert "job array" in joined and "run after job" in joined

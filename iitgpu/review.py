@@ -31,6 +31,36 @@ def _env_display(ls: LaunchSpec) -> str:
             or ("(none — system python)" if ls.env_kind == "none" else "(not set)"))
 
 
+# Fields the submit path does NOT consume for a given intent. A row that shows a
+# value the renderer discards is a lie, and an editor for it is a setting that
+# silently does nothing — so both the summary panel and the menu drop them.
+#   shell    — build_interactive_cmd() takes partition/cpus/mem/gres/time only:
+#              no environment, no data/model, no array/dependency/mail. Spec §1
+#              says a shell is size + time.
+#   notebook — render_notebook_sbatch() ignores data_path and model_path (it has
+#              no run_command to export them for). What a session really needs
+#              pre-installed is packages, which gets its own row below.
+_NOOP_FIELDS: dict[str, set[str]] = {
+    "shell":    {"Script", "Environment", "Data / model", "Args", "Advanced"},
+    "notebook": {"Script", "Data / model", "Args"},
+    "batch":    set(),
+}
+
+_CHOICE_FOR_FIELD = {
+    "Script":       "Change script",
+    "Environment":  "Change environment",
+    "Data / model": "Change data / model",
+    "Args":         "Change args",
+    "Advanced":     "Advanced…",
+}
+
+_PKG_CHOICE = "Change python packages"
+
+
+def _noop_fields(ls: LaunchSpec) -> set[str]:
+    return _NOOP_FIELDS.get(ls.intent, set())
+
+
 def _vram_note(ls: LaunchSpec, stats) -> str:
     """The VRAM caveat, with the actual per-shard share when the node reports it.
 
@@ -67,10 +97,14 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
         ("Time limit", _fmt_time(ls.time_limit)),
         ("Data / model", escape(ls.data_path or ls.model_path or "(none)")),
     ]
+    if ls.intent == "notebook":   # the one dependency question a session has
+        rows.append(("Packages", escape(ls.requirements or ls.packages or "(none)")))
     if ls.intent == "batch":   # nothing else has a command line to carry args
         rows.append(("Args", escape(ls.args or "(none)")))
     rows.append(
         ("Advanced", "on" if (ls.array or ls.dependency or not ls.mail) else "off"))
+    hidden = _noop_fields(ls)
+    rows = [(k, v) for k, v in rows if k not in hidden]
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
     share = gpu_share_note(ls.gpu_shards)
     body += f"\n\n  [dim]{share}[/]\n  [dim]{_vram_note(ls, stats)}[/]"
@@ -191,13 +225,16 @@ def _edit_args(ls: LaunchSpec) -> None:
 def _edit_advanced(ls: LaunchSpec) -> None:
     from iitgpu.validate import clean_array_spec, clean_dependency
     while True:
-        sel = questionary.select("Advanced:", choices=[
-            f"job array [{ls.array or 'off'}]",
-            f"run after job [{ls.dependency or 'off'}]",
-            f"email notifications [{'on' if ls.mail else 'off'}]",
-            "view generated sbatch",
-            "back",
-        ]).ask()
+        opts = []
+        # render_notebook_sbatch() emits neither --array nor --dependency: a
+        # JupyterLab session is one interactive allocation, and both settings
+        # would be accepted here and thrown away at submit.
+        if ls.intent != "notebook":
+            opts += [f"job array [{ls.array or 'off'}]",
+                     f"run after job [{ls.dependency or 'off'}]"]
+        opts += [f"email notifications [{'on' if ls.mail else 'off'}]",
+                 "view generated sbatch", "back"]
+        sel = questionary.select("Advanced:", choices=opts).ask()
         if sel is None or sel == "back":
             return
         if sel.startswith("job array"):
@@ -230,12 +267,16 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
         except Exception:
             pass
         console.print(render_hub(ls, stats))
-        # Script and args only exist for a batch job — a JupyterLab session or a
-        # shell has no command line to put them on, so offering the rows would
-        # be offering a setting that silently does nothing.
-        choices = [c for c in _HUB_CHOICES
-                   if not (c in ("Change script", "Change args")
-                           and ls.intent != "batch")]
+        # Same rule as the panel above: never offer an editor for a field this
+        # intent's submit path throws away (see _NOOP_FIELDS).
+        hidden = {_CHOICE_FOR_FIELD[f] for f in _noop_fields(ls)
+                  if f in _CHOICE_FOR_FIELD}
+        choices = [c for c in _HUB_CHOICES if c not in hidden]
+        if ls.intent == "notebook" and deps_prompt is not None:
+            # A session's data/model rows are gone, but what to pip-install
+            # before the first cell runs is real — render_notebook_sbatch()
+            # consumes it — so it gets its own row.
+            choices.insert(choices.index("Change environment") + 1, _PKG_CHOICE)
         sel = questionary.select("Select:", choices=choices).ask()
         if sel is None or sel == "Cancel":
             return None
@@ -258,6 +299,8 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
             _edit_env(ls, cfg)
         elif sel == "Change data / model":
             _edit_data_model(ls, browse_data, deps_prompt)
+        elif sel == _PKG_CHOICE:
+            ls.requirements, ls.packages = deps_prompt()
         elif sel == "Change args":
             _edit_args(ls)
         elif sel == "Advanced…":
