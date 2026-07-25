@@ -54,8 +54,10 @@ done
 
 if [ "$fail" -ne 0 ]; then
     echo
-    echo "Fix on the GPU HOST (the NFS server — root is squashed on the login node):"
-    echo "  ssh root-daham@192.168.122.1 'sudo bash /opt/iit-gpu/deploy/fix-shared-perms.sh'"
+    echo "Fix on the GPU HOST (the NFS server — root is squashed on the login node)."
+    echo "From a shell on the GPU host:"
+    echo "  ssh slurmadmin@192.168.122.10 'cat /opt/iit-gpu/deploy/fix-shared-perms.sh' > /tmp/fix-shared-perms.sh"
+    echo "  sudo bash /tmp/fix-shared-perms.sh"
     exit 1
 fi
 
