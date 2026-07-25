@@ -405,6 +405,22 @@ def _user_home_snippet() -> list[str]:
     return lines
 
 
+# Background watcher that marks the moment JupyterLab actually accepts
+# connections. squeue says RUNNING as soon as the sbatch starts, minutes
+# before the server is reachable; the TUI shows STARTING until this marker
+# exists. Pure bash /dev/tcp — no curl/nc dependency on the compute node.
+def _ready_marker_snippet(folder: str) -> list[str]:
+    return [
+        "( for _i in $(seq 1 150); do",
+        '    if (exec 3<>"/dev/tcp/127.0.0.1/$IIT_PORT") 2>/dev/null; then',
+        f'        touch "{folder}/.iit-ready"; break',
+        "    fi",
+        "    sleep 2",
+        "  done ) &",
+        "",
+    ]
+
+
 def render_notebook_sbatch(
     spec: "JobSpec",
     folder: str,
@@ -498,7 +514,8 @@ def render_notebook_sbatch(
             f"--ServerApp.root_dir=$IIT_USER_ROOT --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
 
-    lines += _NODE_ADDR_SNIPPET + _free_port_snippet(port) + _user_home_snippet()
+    lines += (_NODE_ADDR_SNIPPET + _free_port_snippet(port)
+              + _user_home_snippet() + _ready_marker_snippet(folder))
     lines += [
         "# Generate a random per-job token (not logged beyond this script's stdout)",
         'JUPYTER_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(24))")',

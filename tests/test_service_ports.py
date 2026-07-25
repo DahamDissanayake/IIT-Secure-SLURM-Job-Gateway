@@ -130,3 +130,26 @@ def test_resolver_spreads_concurrent_jobs_across_ports(tmp_path):
     a = _run_resolver(script, "331", occupied=[])
     b = _run_resolver(script, "332", occupied=[])
     assert a != b, f"both jobs targeted port {a}"
+
+
+# ── Readiness marker ─────────────────────────────────────────────────────────
+
+def test_notebook_script_writes_ready_marker_when_port_answers(tmp_path):
+    """RUNNING is not "ready": the TUI shows STARTING until the server accepts
+    connections. The job itself is the only thing positioned to know, so it
+    writes .iit-ready once the port answers — pure bash /dev/tcp, no deps."""
+    script = _notebook(tmp_path)
+    assert "/dev/tcp/127.0.0.1/$IIT_PORT" in script
+    assert f"{tmp_path}/.iit-ready" in script
+    # watcher must be backgrounded BEFORE the (blocking) jupyter line
+    assert script.index("/dev/tcp") < script.index("jupyter lab --no-browser")
+
+
+def test_ready_watcher_present_in_container_path_too(tmp_path):
+    from iitgpu.jobs import JobSpec, render_notebook_sbatch
+    spec = JobSpec(job_name="nb", partition="gpu", gpu_shards=1, cpus=8,
+                   mem_gb=14, time_limit="08:00:00", run_command="",
+                   task_type="notebook", container_image="/shared/images/x.sif")
+    s = render_notebook_sbatch(spec, str(tmp_path), port=8888,
+                               gateway_host="gw.edu", gateway_port=2225)
+    assert "/dev/tcp/127.0.0.1/$IIT_PORT" in s and ".iit-ready" in s
