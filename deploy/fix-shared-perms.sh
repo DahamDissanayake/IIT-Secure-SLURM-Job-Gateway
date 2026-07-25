@@ -17,6 +17,12 @@ echo "== $NFS_ROOT itself -> 2775 (group writable, other read-only)"
 # check-shared-perms.sh fails the deploy if $NFS_ROOT itself is writable by
 # "other" and tells the operator to run this script. Make that true.
 chmod 2775 "$NFS_ROOT"
+# Admins need WRITE at the top level of $NFS_ROOT: the admin TUI creates and
+# unlinks flag files there (.maintenance.json, .mail-disabled), and unlink
+# requires write on the parent directory. 2775 alone locked admins out
+# (v1.1.0 regression: "Permission denied: /shared/.maintenance.json").
+# Access ACL only — no default ACL, so new top-level entries do not open up.
+setfacl -m "g:$ADMIN_GROUP:rwx" "$NFS_ROOT"
 
 echo "== shared assets -> 2775 (group writable, other read-only) -- top level only,"
 echo "   contents underneath are NOT touched (see check-shared-perms.sh header)"
