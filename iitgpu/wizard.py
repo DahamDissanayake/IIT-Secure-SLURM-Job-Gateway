@@ -881,6 +881,8 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
             gateway_host=cfg.gateway_host, gateway_port=int(cfg.gateway_port),
             requirements=nb_requirements, packages=nb_packages,
         )
+        from iitgpu.jobs import gpu_share_note
+        info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
         panel("Generated notebook sbatch script", script_text)
 
         if not _vram_check(task_type):
@@ -1076,7 +1078,9 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
     elif chosen_container:
         _env_display = f"container: {Path(chosen_container).name}"
 
+    from iitgpu.jobs import gpu_share_note
     summary_lines = (
+        f"  GPU share  : {gpu_share_note(spec.gpu_shards)}\n"
         f"  Data path  : {data_path or 'not set'}\n"
         f"  Model path : {model_path or 'not set'}\n"
         f"  Environment: {_env_display}\n"

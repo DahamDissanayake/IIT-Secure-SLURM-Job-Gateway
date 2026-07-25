@@ -648,3 +648,18 @@ def test_vram_check_present_in_wizard_source():
     assert src.count("_vram_check") >= 2, (
         f"Expected _vram_check called at least twice in run_wizard, found {src.count('_vram_check')}"
     )
+
+
+def test_gpu_share_note_describes_a_partial_card():
+    """A one-slice job must say so — resource sizing changed and nothing said."""
+    from iitgpu.jobs import SHARDS_PER_GPU, gpu_share_note
+    note = gpu_share_note(1)
+    assert f"1/{SHARDS_PER_GPU}" in note
+    assert "left for others" in note
+
+
+def test_gpu_share_note_is_used_by_the_wizard():
+    """Defined-but-unused is worse than absent: it reads as done."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "gpu_share_note" in src, "wizard must show the GPU share to the user"
