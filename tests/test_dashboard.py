@@ -773,3 +773,86 @@ def test_dashboard_offers_connect_key_for_jupyter_jobs():
     src = (Path(__file__).resolve().parents[1] / "iitgpu" / "dashboard.py").read_text()
     assert 'key == "t"' in src
     assert "parse_connect" in src and "render_card" in src
+
+
+def test_is_ready_job_detects_marker(tmp_path):
+    """_is_ready_job returns True when .iit-ready exists in the job folder."""
+    job_dir = tmp_path / "notebook_20260530_120000"
+    job_dir.mkdir()
+    log = job_dir / "slurm-40.out"
+    log.write_text("JupyterLab running")
+    (job_dir / ".iit-ready").write_text("")
+    from iitgpu.dashboard import _is_ready_job
+    assert _is_ready_job("40", str(tmp_path)) is True
+
+
+def test_is_ready_job_no_marker_returns_false(tmp_path):
+    log = tmp_path / "slurm-41.out"
+    log.write_text("regular job")
+    from iitgpu.dashboard import _is_ready_job
+    assert _is_ready_job("41", str(tmp_path)) is False
+
+
+# ── _connect_renderable: the token-protecting guard ──────────────────────────
+
+# Same fixture Task 2 uses to test parse_connect — a full, authoritative
+# job-output block with the tunnel command and the browser URL/token.
+_SAMPLE_OUT = """=================================================
+JupyterLab is starting on the GPU node.
+Token: bc123979da0269048efef70ff6bfb8fffdbb2ef71827937f
+SSH tunnel — open a NEW terminal on YOUR LAPTOP and run:
+  ssh -p 2225 -N -L 8930:192.168.122.1:8930 yenuli@10.35.4.100
+  (-N = tunnel only, no shell opens — terminal sitting idle is correct)
+Then open in browser: http://127.0.0.1:8930/lab?token=bc123979da0269048efef70ff6bfb8fffdbb2ef71827937f
+=================================================
+"""
+
+
+def test_connect_renderable_none_for_other_users_job(tmp_path):
+    """Must return None for a job that isn't the caller's own, even when the
+    folder holds a complete tunnel block — this is the guard against printing
+    someone else's token onto the caller's screen."""
+    from iitgpu.dashboard import _connect_renderable
+    from iitgpu.slurm import QueueEntry
+
+    job_dir = tmp_path / "bob" / "notebook_20260530_120000"
+    job_dir.mkdir(parents=True)
+    (job_dir / ".iit-jupyter").write_text("")
+    (job_dir / "slurm-30.out").write_text(_SAMPLE_OUT)
+
+    sel = QueueEntry("30", "notebook", "RUNNING", "gpu", "0:10", 1, user="bob")
+    assert _connect_renderable(sel, "alice", str(tmp_path)) is None
+
+
+def test_connect_renderable_not_ready_for_own_job_without_tunnel(tmp_path):
+    """Own jupyter job, but the log has no tunnel info yet -> not-ready notice."""
+    from iitgpu.dashboard import _connect_renderable
+    from iitgpu.slurm import QueueEntry
+
+    job_dir = tmp_path / "alice" / "notebook_20260530_130000"
+    job_dir.mkdir(parents=True)
+    (job_dir / ".iit-jupyter").write_text("")
+    (job_dir / "slurm-31.out").write_text("JupyterLab is starting on the GPU node.\n")
+
+    sel = QueueEntry("31", "notebook", "RUNNING", "gpu", "0:10", 1, user="alice")
+    result = _connect_renderable(sel, "alice", str(tmp_path))
+    assert result == "[yellow]Not ready yet — no tunnel info in the job output.[/]"
+
+
+def test_connect_renderable_own_job_with_tunnel_shows_card(tmp_path):
+    """Own jupyter job with a full tunnel block -> a renderable Connect card."""
+    from rich.console import Console
+    from iitgpu.dashboard import _connect_renderable
+    from iitgpu.slurm import QueueEntry
+
+    job_dir = tmp_path / "alice" / "notebook_20260530_140000"
+    job_dir.mkdir(parents=True)
+    (job_dir / ".iit-jupyter").write_text("")
+    (job_dir / "slurm-32.out").write_text(_SAMPLE_OUT)
+
+    sel = QueueEntry("32", "notebook", "RUNNING", "gpu", "0:10", 1, user="alice")
+    result = _connect_renderable(sel, "alice", str(tmp_path))
+    con = Console(force_terminal=True, width=160)
+    with con.capture() as cap:
+        con.print(result)
+    assert "ssh -p 2225 -N -L 8930:192.168.122.1:8930" in cap.get()

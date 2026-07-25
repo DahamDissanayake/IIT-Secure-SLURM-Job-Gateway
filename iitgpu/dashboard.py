@@ -131,6 +131,20 @@ def _is_ready_job(job_id: str, jdir: str) -> bool:
     return (Path(log_path).parent / ".iit-ready").exists()
 
 
+def _connect_renderable(sel: QueueEntry | None, current_user: str, jdir: str):
+    """What pressing t shows for the selected job: the Connect card, a
+    not-ready notice, or None when the caller may not see it (not their job
+    or not a jupyter job) — tokens must never render for someone else's job."""
+    if sel is None or sel.user != current_user:
+        return None
+    if not _is_jupyter_job(sel.job_id, str(Path(jdir) / sel.user)):
+        return None
+    from iitgpu.connect import parse_connect, render_card
+    log = _find_job_log(sel.job_id, str(Path(jdir) / sel.user))
+    info = parse_connect(Path(log).read_text()) if log else None
+    return render_card(info) if info else "[yellow]Not ready yet — no tunnel info in the job output.[/]"
+
+
 # ── Cluster panel (compact summary bar) ──────────────────────────────────────
 
 def _build_cluster_panel(stats: NodeStats | None) -> Panel:
@@ -354,9 +368,10 @@ def _build_layout(
     can_cancel = bool(_active and (is_own_job or is_admin))
     can_extend = (is_own_job and is_jupyter
                   and selected_job and selected_job.state == "RUNNING")
+    can_connect = bool(is_own_job and is_jupyter)
     cancel_hint = "[bold]C=cancel[/bold]" if can_cancel else "[dim]C=─[/dim]"
     extend_hint = "[bold]E=+2h[/bold]"   if can_extend else "[dim]E=─[/dim]"
-    connect_hint = "   [bold]T=connect[/bold]" if is_jupyter else ""
+    connect_hint = "   [bold]T=connect[/bold]" if can_connect else ""
     admin_tag   = "  [dim](admin)[/dim]" if is_admin else ""
     layout["footer"].update(
         f"[dim]  Q=quit   S=switch   {cancel_hint}   {extend_hint}   R=refresh"
@@ -589,10 +604,20 @@ def run_dashboard(job_id: str | None = None) -> None:
         _last_data_ts[0] = time.monotonic()
         _new_jready: dict[str, bool] = {}
         for _j in jobs:
-            if _j.state == "RUNNING" and _is_jupyter_job(_j.job_id, str(Path(jdir) / _j.user)):
-                _new_jready[_j.job_id] = _is_ready_job(_j.job_id, str(Path(jdir) / _j.user))
+            if _j.state != "RUNNING":
+                continue
+            _jlog = _find_job_log(_j.job_id, str(Path(jdir) / _j.user))
+            if _jlog is None:
+                continue
+            _jfolder = Path(_jlog).parent
+            if (_jfolder / ".iit-jupyter").exists():
+                _new_jready[_j.job_id] = (_jfolder / ".iit-ready").exists()
         _jready = _new_jready
-        # detect jupyter + 30-min warning (own jobs only)
+        # detect jupyter + 30-min warning (own jobs only). Reset first, then
+        # set True only when the selected job is both the caller's own and a
+        # jupyter job — the footer's T=connect hint and the token-bearing
+        # Connect card must never appear to be offered for someone else's job.
+        _is_jupyter[0] = False
         if sel and is_own and sel.job_id:
             _is_jupyter[0] = _is_jupyter_job(sel.job_id, str(Path(jdir) / sel.user))
             remaining = _time_remaining(sel)
@@ -615,8 +640,6 @@ def run_dashboard(job_id: str | None = None) -> None:
                         )
                 except Exception:
                     pass
-        else:
-            _is_jupyter[0] = False
 
     _refresh_data()
 
@@ -711,15 +734,10 @@ def run_dashboard(job_id: str | None = None) -> None:
                         live.start()
                 elif key == "t":
                     sel = jobs[selected_idx] if jobs and selected_idx < len(jobs) else None
-                    if sel and sel.user == current_user and _is_jupyter[0]:
-                        from iitgpu.connect import parse_connect, render_card
-                        _log = _find_job_log(sel.job_id, str(Path(jdir) / sel.user))
-                        _info = parse_connect(Path(_log).read_text()) if _log else None
+                    _renderable = _connect_renderable(sel, current_user, jdir)
+                    if _renderable is not None:
                         live.stop()
-                        if _info:
-                            console.print(render_card(_info))
-                        else:
-                            console.print("[yellow]Not ready yet — no tunnel info in the job output.[/]")
+                        console.print(_renderable)
                         input("Press Enter to return to the dashboard…")
                         live.start()
                 elif key == "r":
