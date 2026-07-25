@@ -239,6 +239,36 @@ Drift detection lives in `redeploy-igm.sh`, which can only report because of
 is accessible to `other`, printing the exact remediation command to run on the
 GPU host.
 
+#### Addendum — ACLs are authoritative on this filesystem, not mode bits
+
+Deployed after the above went live: on this NFS export, POSIX group
+permissions described above do **not** actually govern access — default
+ACLs do, and `stat`/mode bits give no indication of that. Verified live: a
+per-user area reporting `group=gpuadmins mode=660` had ACL entry
+`group::---` — the owning group had **no** access at all; only users named
+explicitly in the ACL could get in. setgid is also not inherited on this
+share (same `mkdir`, same non-admin user: a `2770` parent yields a `2770`
+child on `/tmp` but a `5770`/`1770` child, no setgid, on `/shared`), so no
+umask/chmod strategy reaches admin access here either. This is how
+`dahamadmin` and `indrajith` — real accounts in `gpuadmins` — were denied
+access that mode bits said they had.
+
+Admin access is therefore delivered by an explicit ACL entry, applied to
+every per-user area:
+
+```
+setfacl -R -m g:gpuadmins:rwX -m d:g:gpuadmins:rwx  /shared/users/<user>  /shared/jobs/<user>
+```
+
+(`rwX`, capital X, so data files don't gain spurious `+x`.) The `d:` default
+entry is what makes this survive anything written into the area later —
+including job folders, which inherit it rather than any setgid/group
+mechanism. `deploy/fix-shared-perms.sh` applies this to existing areas,
+`deploy/iit-gpu-adduser.sh` applies it explicitly to new ones, and
+`deploy/check-shared-perms.sh` verifies the ACL entry is present (via
+`getfacl`, on the GPU host — see that script's header for why the check
+can't trust `getfacl` output from the login node).
+
 ### P0-2 — Notebook jail
 
 `render_notebook_sbatch` switches from `--notebook-dir=/shared` to
