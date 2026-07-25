@@ -412,7 +412,7 @@ def _user_home_snippet() -> list[str]:
 def _ready_marker_snippet(folder: str) -> list[str]:
     return [
         "( for _i in $(seq 1 150); do",
-        '    if (exec 3<>"/dev/tcp/127.0.0.1/$IIT_PORT") 2>/dev/null; then',
+        '    if (exec 3<>"/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT") 2>/dev/null; then',
         f'        touch "{folder}/.iit-ready"; break',
         "    fi",
         "    sleep 2",

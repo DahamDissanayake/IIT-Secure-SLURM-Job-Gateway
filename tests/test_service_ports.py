@@ -139,7 +139,7 @@ def test_notebook_script_writes_ready_marker_when_port_answers(tmp_path):
     connections. The job itself is the only thing positioned to know, so it
     writes .iit-ready once the port answers — pure bash /dev/tcp, no deps."""
     script = _notebook(tmp_path)
-    assert "/dev/tcp/127.0.0.1/$IIT_PORT" in script
+    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in script
     assert f"{tmp_path}/.iit-ready" in script
     # watcher must be backgrounded BEFORE the (blocking) jupyter line
     assert script.index("/dev/tcp") < script.index("jupyter lab --no-browser")
@@ -152,4 +152,12 @@ def test_ready_watcher_present_in_container_path_too(tmp_path):
                    task_type="notebook", container_image="/shared/images/x.sif")
     s = render_notebook_sbatch(spec, str(tmp_path), port=8888,
                                gateway_host="gw.edu", gateway_port=2225)
-    assert "/dev/tcp/127.0.0.1/$IIT_PORT" in s and ".iit-ready" in s
+    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in s and ".iit-ready" in s
+
+
+def test_ready_watcher_probes_the_address_jupyter_binds(tmp_path):
+    """Jupyter binds $IIT_NODE_ADDR, not loopback — probing 127.0.0.1 made the
+    marker never fire on the real cluster (live job 344): STARTING forever."""
+    script = _notebook(tmp_path)
+    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in script
+    assert "/dev/tcp/127.0.0.1" not in script
