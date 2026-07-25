@@ -274,3 +274,41 @@ def test_hub_omits_the_args_row_for_a_session():
     batch = default_spec("batch")
     batch.script = "/s/u/train.py"
     assert "Args" in _plain(render_hub(batch, None))
+
+
+# ── Final whole-branch review: I1, I3, I4, I5, M1 ────────────────────────────
+
+def _live_stats(total_mb=32768, used_mb=4096, free=3):
+    s = _stats(free)
+    s.gpu_mem_total_mb = total_mb
+    s.gpu_mem_used_mb = used_mb
+    s.live_stats = True
+    return s
+
+
+def test_hub_vram_share_scales_with_the_requested_shards():
+    """I1: the line used to read "about 8 GB of 32" for every job, so a
+    Whole-GPU launch was told it owned the card and got an eighth of it in the
+    same panel. The number now comes from the live reading and the shard count."""
+    from iitgpu.launchspec import apply_size, default_spec
+
+    one = default_spec("batch")            # Standard == 1 shard
+    out_one = _plain(render_hub(one, _live_stats()))
+    assert "8 GB of 32" in out_one
+
+    whole = default_spec("batch")
+    apply_size(whole, "whole")
+    out_whole = _plain(render_hub(whole, _live_stats()))
+    assert "32 GB of 32" in out_whole
+    # The contradiction the finding was about: whole-GPU must not repeat the
+    # one-shard sentence.
+    assert "8 GB of 32" not in out_whole
+    assert "the whole GPU" in out_whole
+
+
+def test_hub_vram_line_claims_no_number_without_live_stats():
+    """I1: no live reading, no invented figure — but the pinned wording stays."""
+    out = _plain(render_hub(default_spec("batch"), _stats(3)))
+    assert "shared" in out.lower() and "not enforced" in out.lower()
+    assert "GB of" not in out
+    assert "8 GB" not in out

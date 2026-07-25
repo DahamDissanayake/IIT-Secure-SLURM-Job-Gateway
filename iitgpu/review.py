@@ -7,7 +7,7 @@ import questionary
 from rich.markup import escape
 from rich.panel import Panel
 
-from iitgpu.jobs import gpu_share_note
+from iitgpu.jobs import SHARDS_PER_GPU, gpu_share_note
 from iitgpu.launchspec import (SIZES, LaunchSpec, apply_size, availability_line,
                                size_availability, size_label)
 from iitgpu.slurm import get_node_stats
@@ -29,6 +29,25 @@ def _fmt_time(t: str) -> str:
 def _env_display(ls: LaunchSpec) -> str:
     return (ls.container_image or ls.conda_env or ls.venv_path
             or ("(none — system python)" if ls.env_kind == "none" else "(not set)"))
+
+
+def _vram_note(ls: LaunchSpec, stats) -> str:
+    """The VRAM caveat, with the actual per-shard share when the node reports it.
+
+    This used to hardcode "about 8 GB of 32" no matter how much of the card the
+    job had reserved, so a Whole-GPU job was told it owned the card and got an
+    eighth of it in the same panel. The arithmetic mirrors `_vram_check()` in
+    wizard.py, which has always done this correctly at submit time.
+    """
+    base = "GPU memory is shared between jobs and not enforced"
+    total_mb = getattr(stats, "gpu_mem_total_mb", 0) if stats else 0
+    if not (stats and getattr(stats, "live_stats", False) and total_mb):
+        return f"{base}."
+    total_gb = total_mb / 1024
+    shards = max(1, min(ls.gpu_shards, SHARDS_PER_GPU))
+    share_gb = total_gb * shards / SHARDS_PER_GPU
+    return (f"{base} — your fair share is about "
+            f"{share_gb:.0f} GB of {total_gb:.0f}.")
 
 
 def render_hub(ls: LaunchSpec, stats) -> Panel:
@@ -54,9 +73,7 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
         ("Advanced", "on" if (ls.array or ls.dependency or not ls.mail) else "off"))
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
     share = gpu_share_note(ls.gpu_shards)
-    vram = ("GPU memory is shared between jobs and not enforced — "
-            "your fair share is about 8 GB of 32.")
-    body += f"\n\n  [dim]{share}[/]\n  [dim]{vram}[/]"
+    body += f"\n\n  [dim]{share}[/]\n  [dim]{_vram_note(ls, stats)}[/]"
     return Panel(body, title=f"[bold] Ready to launch ─ {availability_line(stats)} [/bold]",
                  border_style="cyan")
 
