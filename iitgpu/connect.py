@@ -14,7 +14,7 @@ from typing import Callable
 
 from rich.panel import Panel
 
-_TUNNEL_RE = re.compile(r"^\s*(ssh -p \d+ -N -L \d+:[\d.]+:\d+ \S+@\S+)\s*$", re.M)
+_TUNNEL_RE = re.compile(r"^\s*(ssh -p \d+ -N -L \d+:\S+:\d+ \S+@\S+)\s*$", re.M)
 _URL_RE = re.compile(r"(http://127\.0\.0\.1:(\d+)/lab\?token=([0-9a-f]+))")
 
 
@@ -61,10 +61,11 @@ def wait_ready(folder: str, is_alive: Callable[[], bool],
     """
     deadline = time.monotonic() + timeout
     mp = marker_path(folder)
-    while time.monotonic() < deadline:
+    while True:
         if mp.exists():
             return "ready"
         if not is_alive():
             return "gone"
+        if time.monotonic() >= deadline:
+            return "timeout"
         time.sleep(poll)
-    return "ready" if mp.exists() else "timeout"

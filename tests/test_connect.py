@@ -30,6 +30,18 @@ def test_parse_connect_none_when_not_started_yet():
     assert parse_connect("") is None
 
 
+def test_parse_connect_hostname_node_addr():
+    # NodeAddr can resolve to a hostname rather than an IP on some SLURM configs.
+    out = SAMPLE_OUT.replace(
+        "ssh -p 2225 -N -L 8930:192.168.122.1:8930 yenuli@10.35.4.100",
+        "ssh -p 2225 -N -L 8930:gpu-node03.cluster.local:8930 yenuli@10.35.4.100",
+    )
+    info = parse_connect(out)
+    assert info is not None
+    assert info.port == 8930
+    assert info.tunnel == "ssh -p 2225 -N -L 8930:gpu-node03.cluster.local:8930 yenuli@10.35.4.100"
+
+
 def test_render_card_shows_both_steps():
     info = parse_connect(SAMPLE_OUT)
     con = Console(force_terminal=True, width=100)
@@ -50,3 +62,10 @@ def test_wait_ready_states(tmp_path):
     assert wait_ready(str(tmp_path), is_alive=lambda: False, timeout=1, poll=0.01) == "gone"
     # timeout: alive but never ready
     assert wait_ready(str(tmp_path), is_alive=lambda: True, timeout=0.05, poll=0.01) == "timeout"
+
+
+def test_wait_ready_timeout_zero_still_checks_first_iteration(tmp_path):
+    # even with a past/zero deadline, one marker check and one is_alive check must happen
+    assert wait_ready(str(tmp_path), is_alive=lambda: False, timeout=0) == "gone"
+    marker_path(str(tmp_path)).touch()
+    assert wait_ready(str(tmp_path), is_alive=lambda: True, timeout=0) == "ready"
