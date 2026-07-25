@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import questionary
+from rich.markup import escape
 from rich.panel import Panel
 
 from iitgpu.jobs import gpu_share_note
 from iitgpu.launchspec import (SIZES, LaunchSpec, apply_size, availability_line,
-                               size_availability, size_label, size_name_for)
+                               size_availability, size_label)
 from iitgpu.slurm import get_node_stats
 from iitgpu.ui import console, info, warn
 
@@ -31,17 +32,22 @@ def _env_display(ls: LaunchSpec) -> str:
 
 
 def render_hub(ls: LaunchSpec, stats) -> Panel:
+    # Every value below that can contain user-supplied text (script name/path,
+    # env paths, data/model, args) is wrapped in escape() — this is the one
+    # screen whose job is to show exactly what will launch, so a filename or
+    # --arg containing "[...]" must render literally, not as markup/color.
     rows = []
     if ls.intent == "batch":
         from pathlib import Path
         p = Path(ls.script)
-        rows.append(("Script", f"{p.name}   ({p.parent})" if ls.script else "(not set)"))
+        rows.append(("Script", f"{escape(p.name)}   ({escape(str(p.parent))})"
+                     if ls.script else "(not set)"))
     rows += [
-        ("Environment", _env_display(ls)),
+        ("Environment", escape(_env_display(ls))),
         ("Size", f"{size_label(ls)}   [dim]{size_availability(ls.gpu_shards, stats)}[/]"),
         ("Time limit", _fmt_time(ls.time_limit)),
-        ("Data / model", ls.data_path or ls.model_path or "(none)"),
-        ("Args", ls.args or "(none)"),
+        ("Data / model", escape(ls.data_path or ls.model_path or "(none)")),
+        ("Args", escape(ls.args or "(none)")),
         ("Advanced", "on" if (ls.array or ls.dependency or not ls.mail) else "off"),
     ]
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
@@ -78,16 +84,28 @@ def _edit_time(ls: LaunchSpec) -> None:
     raw = questionary.text("Time limit (HH:MM):").ask() or ""
     import re
     m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw.strip())
-    if m:
-        ls.time_limit = f"{int(m.group(1)):02d}:{m.group(2)}:00"
-    else:
+    if not m:
         warn("Not HH:MM — keeping the current limit.")
+        return
+    hours, mins = int(m.group(1)), int(m.group(2))
+    if mins >= 60 or (hours == 0 and mins == 0):
+        warn("Not HH:MM — keeping the current limit.")
+        return
+    if hours > 8:
+        warn("Max is 8h (cluster QOS limit) — keeping the current limit.")
+        return
+    ls.time_limit = f"{hours:02d}:{mins:02d}:00"
 
 
 def _edit_env(ls: LaunchSpec, cfg) -> None:
     from pathlib import Path
     envs_dir = Path(getattr(cfg, "nfs_root", "/shared")) / "envs"
-    prebuilt = sorted(str(p) for p in envs_dir.iterdir() if p.is_dir()) if envs_dir.is_dir() else []
+    prebuilt: list[str] = []
+    if envs_dir.is_dir():
+        try:
+            prebuilt = sorted(str(p) for p in envs_dir.iterdir() if p.is_dir())
+        except OSError:
+            prebuilt = []   # permission denied etc. — menu still offers own-path/container/none
     choices = [f"prebuilt: {Path(p).name}" for p in prebuilt] + [
         "own conda env (path)", "own venv (path)", "container image (.sif)", "none (system python)"]
     sel = questionary.select("Environment:", choices=choices).ask()

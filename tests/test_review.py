@@ -89,3 +89,94 @@ def test_run_hub_size_editor_applies_choice(monkeypatch):
     monkeypatch.setattr(R.questionary, "select", _Ask(choice))
     R._edit_size(ls, None)
     assert ls.gpu_shards == SHARDS_PER_GPU and ls.cpus == 16 and ls.mem_gb == 60
+
+
+# ── Fix round 1: review findings ─────────────────────────────────────────────
+
+def test_hub_escapes_user_supplied_markup():
+    """The one screen whose job is 'show exactly what will launch' must not let
+    a filename or --arg containing Rich markup swallow text or apply color."""
+    ls = default_spec("batch")
+    ls.script = "/u/[experiment]_v2.py"
+    ls.args = "--x [red]INJ[/red]"
+    out = _plain(render_hub(ls, None))
+    assert "[experiment]_v2.py" in out
+    # Unescaped, Rich would colourise INJ and the literal "[red]" tag would
+    # vanish from the plain capture. Escaped, the raw tag text survives.
+    assert "[red]INJ[/red]" in out
+
+
+class _Fixed:
+    """questionary select()/text() stand-in that always answers the same value."""
+    def __init__(self, val): self.val = val
+    def __call__(self, *a, **kw): return self
+    def ask(self): return self.val
+
+
+def test_edit_time_custom_rejects_minutes_over_59(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    before = ls.time_limit
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("25:99"))
+    R._edit_time(ls)
+    assert ls.time_limit == before
+
+
+def test_edit_time_custom_rejects_zero_duration(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    before = ls.time_limit
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("0:00"))
+    R._edit_time(ls)
+    assert ls.time_limit == before
+
+
+def test_edit_time_custom_rejects_over_cluster_max(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    before = ls.time_limit
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("09:00"))
+    R._edit_time(ls)
+    assert ls.time_limit == before
+
+
+def test_edit_time_custom_accepts_valid_value(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("03:30"))
+    R._edit_time(ls)
+    assert ls.time_limit == "03:30:00"
+
+
+def test_edit_env_handles_permission_error_on_iterdir(monkeypatch):
+    """A permission error while listing prebuilt envs must not crash the
+    wizard — it should degrade to an empty prebuilt list."""
+    import iitgpu.review as R
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "is_dir", lambda self: True)
+    monkeypatch.setattr(Path, "iterdir", lambda self: (_ for _ in ()).throw(PermissionError("nope")))
+    monkeypatch.setattr(R.questionary, "select", _Fixed(None))  # user backs out
+    ls = default_spec("batch")
+    R._edit_env(ls, cfg=None)   # must not raise
+
+
+def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
+    import iitgpu.review as R
+
+    class _Ask:
+        def __init__(self, answers): self.answers = list(answers)
+        def __call__(self, *a, **kw): return self
+        def ask(self): return self.answers.pop(0)
+
+    ls = default_spec("batch")   # script left unset
+    monkeypatch.setattr(R, "get_node_stats", lambda: None)
+    monkeypatch.setattr(R.questionary, "select", _Ask(["🚀 Launch", "Cancel"]))
+    result = run_hub(ls, cfg=None, user="u",
+                     browse_script=lambda: None, browse_data=lambda: None)
+    assert result is None
+    assert "Pick a script first" in capsys.readouterr().out
