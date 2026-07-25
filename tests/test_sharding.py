@@ -148,3 +148,38 @@ def test_whole_card_tasks_still_fit_on_the_node():
     for task in ("train", "finetune", "custom"):
         d = resource_defaults(task)
         assert d.cpus <= NODE_CPUS and d.mem_gb <= NODE_MEM_GB, task
+
+
+def _nb_script(tmp_path):
+    from iitgpu.jobs import JobSpec, render_notebook_sbatch
+    spec = JobSpec(job_name="notebook", partition="gpu", gpu_shards=1, cpus=8,
+                   mem_gb=14, time_limit="08:00:00", run_command="",
+                   task_type="notebook", conda_env="/shared/envs/data-science")
+    return render_notebook_sbatch(spec, str(tmp_path), port=8888,
+                                  gateway_host="gw.edu", gateway_port=2225)
+
+
+def test_notebook_is_rooted_at_the_users_own_folder(tmp_path):
+    """Serving /shared made the per-user jail meaningless in the notebook."""
+    script = _nb_script(tmp_path)
+    assert "--ServerApp.root_dir=$IIT_USER_ROOT" in script
+    assert "--notebook-dir=/shared" not in script
+
+
+def test_notebook_exposes_shared_assets_by_symlink(tmp_path):
+    """Users still need the datasets they train on."""
+    script = _nb_script(tmp_path)
+    for asset in ("models", "envs", "data", "datasets"):
+        assert f"ln -sfn /shared/{asset}" in script, f"{asset} must be reachable"
+
+
+def test_symlink_creation_is_idempotent(tmp_path):
+    """The job reruns on every launch; -sfn must not fail on an existing link."""
+    script = _nb_script(tmp_path)
+    assert "ln -s " not in script.replace("ln -sfn ", "")
+
+
+def test_notebook_docstring_does_not_claim_loopback_only(tmp_path):
+    """It binds the routable NodeAddr; a false security comment is a trap."""
+    from iitgpu.jobs import render_notebook_sbatch
+    assert "127.0.0.1 only" not in (render_notebook_sbatch.__doc__ or "")

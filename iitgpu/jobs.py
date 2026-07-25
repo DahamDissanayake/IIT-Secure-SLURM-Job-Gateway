@@ -321,6 +321,23 @@ def _free_port_snippet(base_port: int) -> list[str]:
     ]
 
 
+# Bash that defines $IIT_USER_ROOT and exposes the shared assets inside it.
+#
+# JupyterLab used to be rooted at /shared, so its file browser ignored the
+# per-user jail the file manager enforces. It is now rooted at the user's own
+# folder, with the shared read-only assets symlinked in so people can still
+# reach the datasets they train on. Jupyter follows symlinks pointing outside
+# root_dir, which is what makes this work.
+#
+# ln -sfn is idempotent: the job reruns this on every launch.
+def _user_home_snippet() -> list[str]:
+    lines = ['IIT_USER_ROOT="/shared/users/$USER"', 'mkdir -p "$IIT_USER_ROOT"']
+    for asset in ("models", "envs", "data", "datasets"):
+        lines.append(f'ln -sfn /shared/{asset} "$IIT_USER_ROOT/{asset}"')
+    lines.append("")
+    return lines
+
+
 def render_notebook_sbatch(
     spec: "JobSpec",
     folder: str,
@@ -333,7 +350,8 @@ def render_notebook_sbatch(
     """Generate an sbatch script that launches JupyterLab on the GPU node.
 
     The script:
-    - Binds JupyterLab to 127.0.0.1 only (not exposed to network)
+    - Binds JupyterLab to the node's SLURM NodeAddr — reachable from the gateway
+      network but not the public interface — gated by a per-job random token
     - Optionally pip-installs *requirements*/*packages* into ~/.local first, so the
       interactive session starts with the user's deps ready (no first-cell import
       failures)
@@ -371,7 +389,7 @@ def render_notebook_sbatch(
         launcher = (
             f"apptainer exec --nv --bind /shared {spec.container_image} "
             f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port=$IIT_PORT --port-retries=0 "
-            f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
+            f"--ServerApp.root_dir=$IIT_USER_ROOT --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
     else:
         if spec.conda_env:
@@ -410,10 +428,10 @@ def render_notebook_sbatch(
 
         launcher = (
             f"jupyter lab --no-browser --ip=$IIT_NODE_ADDR --port=$IIT_PORT --port-retries=0 "
-            f"--notebook-dir=/shared --IdentityProvider.token=\"$JUPYTER_TOKEN\""
+            f"--ServerApp.root_dir=$IIT_USER_ROOT --IdentityProvider.token=\"$JUPYTER_TOKEN\""
         )
 
-    lines += _NODE_ADDR_SNIPPET + _free_port_snippet(port)
+    lines += _NODE_ADDR_SNIPPET + _free_port_snippet(port) + _user_home_snippet()
     lines += [
         "# Generate a random per-job token (not logged beyond this script's stdout)",
         'JUPYTER_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(24))")',
