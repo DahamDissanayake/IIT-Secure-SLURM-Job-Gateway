@@ -357,11 +357,28 @@ def _free_port_snippet(base_port: int) -> list[str]:
 # reach the datasets they train on. Jupyter follows symlinks pointing outside
 # root_dir, which is what makes this work.
 #
-# ln -sfn is idempotent: the job reruns this on every launch.
+# ln -sfn is idempotent: the job reruns this on every launch. But -sfn only
+# replaces an existing SYMLINK at the destination -- if the destination is
+# already a real file or directory (e.g. users/hassan2/envs, users/public/data
+# are real dirs some users have from before this existed), ln does not
+# clobber it: it creates the link *inside* it instead (.../envs/envs), so the
+# user never gets the shared asset at the documented path and a stray link
+# piles up on every relaunch. Guard each one: only link when the destination
+# is absent or is already a symlink (any target -- ln -sfn safely repoints an
+# existing symlink); otherwise skip it and warn so the user knows why that
+# asset is missing rather than silently getting a nested stray link.
 def _user_home_snippet() -> list[str]:
     lines = ['IIT_USER_ROOT="/shared/users/$USER"', 'mkdir -p "$IIT_USER_ROOT"']
     for asset in ("models", "envs", "data", "datasets"):
-        lines.append(f'ln -sfn /shared/{asset} "$IIT_USER_ROOT/{asset}"')
+        target = f'"$IIT_USER_ROOT/{asset}"'
+        lines += [
+            f'_iit_target={target}',
+            f'if [ -L "$_iit_target" ] || [ ! -e "$_iit_target" ]; then',
+            f'    ln -sfn /shared/{asset} "$_iit_target"',
+            "else",
+            f'    echo "WARNING: $_iit_target already exists and is not a symlink -- skipping the shared {asset} asset (it will not be reachable at that path)." >&2',
+            "fi",
+        ]
     lines.append("")
     return lines
 

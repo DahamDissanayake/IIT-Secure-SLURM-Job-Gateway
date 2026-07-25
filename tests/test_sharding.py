@@ -179,6 +179,28 @@ def test_symlink_creation_is_idempotent(tmp_path):
     assert "ln -s " not in script.replace("ln -sfn ", "")
 
 
+def test_symlink_creation_guards_existing_non_symlink(tmp_path):
+    """users/hassan2/envs and users/public/data are REAL directories, not
+    symlinks. ln -sfn does not clobber a real file/dir at the destination --
+    it links *inside* it instead (envs/envs), silently hiding the shared
+    asset and leaving a stray link behind on every relaunch. The script must
+    check before linking (skip + warn instead of a bare ln -sfn) rather than
+    linking unconditionally."""
+    script = _nb_script(tmp_path)
+    # Every asset link must be preceded by a symlink-or-absent guard, not a
+    # bare unconditional ln -sfn.
+    assert '[ -L "$_iit_target" ] || [ ! -e "$_iit_target" ]' in script
+    assert "WARNING" in script and "already exists and is not a symlink" in script
+    # And the guard must actually wrap the ln -sfn call, not just appear
+    # somewhere else in the script.
+    for asset in ("models", "envs", "data", "datasets"):
+        guarded = (
+            f'if [ -L "$_iit_target" ] || [ ! -e "$_iit_target" ]; then\n'
+            f'    ln -sfn /shared/{asset} "$_iit_target"'
+        )
+        assert guarded in script, f"{asset} link must be guarded, not unconditional"
+
+
 def test_notebook_docstring_does_not_claim_loopback_only(tmp_path):
     """It binds the routable NodeAddr; a false security comment is a trap."""
     from iitgpu.jobs import render_notebook_sbatch
