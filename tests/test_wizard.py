@@ -48,114 +48,12 @@ def test_wizard_module_compiles_and_imports():
     assert callable(wizard.run_wizard)
 
 
-# ─── New tests for TUI refactor (data path, inline paste, rerun) ─────────────
+# ─── TUI refactor: data path in the sbatch, rerun parsing ────────────────────
 
 import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-
-
-def test_inline_paste_creates_file_under_nfs_root(tmp_path, monkeypatch):
-    """Inline paste writes to /shared/<user>/data/<ts>_inline.txt inside the jail."""
-    import iitgpu.wizard as wiz
-    from iitgpu.config import load_config
-
-    # Point NFS_ROOT at tmp_path so in_jail() accepts the destination
-    monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
-
-    cfg = load_config()
-    user = "testuser"
-
-    # Simulate user typing two lines then EOF
-    inputs = iter(["line one", "line two", "EOF"])
-    monkeypatch.setattr("builtins.input", lambda: next(inputs))
-
-    # Mock questionary.confirm to return True (create script) and False (don't use as job)
-    confirm_responses = iter([True, False])
-    monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: next(confirm_responses)))
-
-    # Mock auditclient.log
-    logged = []
-    monkeypatch.setattr("iitgpu.auditclient.log", lambda action, **kw: logged.append(action))
-
-    data_dest, _ = wiz._inline_paste(cfg, user)
-
-    assert data_dest is not None
-    created = Path(data_dest)
-    assert created.exists(), f"Expected file at {data_dest}"
-    content = created.read_text()
-    assert "line one" in content
-    assert "line two" in content
-
-    # Must be inside the jail
-    from iitgpu.validate import in_jail
-    assert in_jail(data_dest), f"{data_dest} not in jail (NFS_ROOT={tmp_path})"
-
-    assert "data_inline_paste" in logged
-
-
-def test_inline_paste_destination_is_jailed(tmp_path, monkeypatch):
-    """If the destination resolves outside the jail, _inline_paste refuses."""
-    import iitgpu.wizard as wiz
-    from iitgpu.config import load_config
-    import dataclasses
-
-    # NFS_ROOT env = /nonexistent so nothing under tmp_path is in the jail
-    monkeypatch.setenv("NFS_ROOT", "/nonexistent_nfs_root_xyz")
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
-
-    cfg = load_config()
-    # cfg.nfs_root now = /nonexistent_nfs_root_xyz (from env), but we override it
-    # to tmp_path so the file gets written there — which is NOT in_jail
-    cfg_bad = dataclasses.replace(cfg, nfs_root=str(tmp_path / "outside"))
-
-    inputs = iter(["some data", "EOF"])
-    monkeypatch.setattr("builtins.input", lambda: next(inputs))
-
-    data_dest, script_path = wiz._inline_paste(cfg_bad, "testuser")
-    # Should return (None, None) because destination is not in_jail
-    assert data_dest is None
-    assert script_path is None
-
-
-def test_generated_loader_script_is_valid_python(tmp_path, monkeypatch):
-    """The auto-generated loader script must compile without errors."""
-    import iitgpu.wizard as wiz
-    from iitgpu.config import load_config
-
-    monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
-
-    cfg = load_config()
-    user = "testuser"
-
-    inputs = iter(["alpha", "beta", "EOF"])
-    monkeypatch.setattr("builtins.input", lambda: next(inputs))
-
-    # confirm: create script = True, use as job script = False
-    confirm_responses = iter([True, False])
-    monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: next(confirm_responses)))
-    monkeypatch.setattr("iitgpu.auditclient.log", lambda *a, **kw: None)
-
-    data_dest, script_path = wiz._inline_paste(cfg, user)
-
-    # Find the generated script by looking in the scripts dir
-    scripts_dir = tmp_path / "users" / user / "scripts"
-    scripts = list(scripts_dir.glob("*_load_data.py")) if scripts_dir.exists() else []
-    assert scripts, "No loader script was generated"
-    script_file = scripts[0]
-
-    source = script_file.read_text()
-    assert "DATA_PATH" in source
-
-    # Must compile without SyntaxError
-    compile(source, str(script_file), "exec")
-
-    # Must be in jail
-    from iitgpu.validate import in_jail
-    assert in_jail(str(script_file))
 
 
 def test_data_path_exported_in_sbatch_when_set(tmp_path):
@@ -566,21 +464,6 @@ def _make_stats(gpu_mem_used_mb: int = 12288, gpu_mem_total_mb: int = 32768):
     )
 
 
-def test_vram_check_passes_when_enough_free(monkeypatch):
-    """_vram_check returns True when requested VRAM fits in free headroom."""
-    from unittest.mock import patch
-    import iitgpu.wizard as wiz
-
-    # 12 GB in use, 32 GB total → 20 GB free; request 10 GB → should pass
-    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
-    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
-         patch("questionary.text") as mock_text:
-        mock_text.return_value.ask.return_value = "10"
-        result = wiz._vram_check("train")
-
-    assert result is True
-
-
 def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
     """The VRAM gate is gone. It asked for an estimate that bound nobody — VRAM
     is shared between concurrent jobs and SLURM does not enforce it — and then
@@ -598,52 +481,15 @@ def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
     with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
          patch("questionary.text", side_effect=_no_prompt), \
          patch("questionary.confirm", side_effect=_no_prompt):
-        result = wiz._vram_check("train")
+        result = wiz._vram_check()
 
     assert result is True
 
-
-def test_vram_check_allows_override_when_user_confirms(monkeypatch):
-    """_vram_check returns True when VRAM is insufficient but user forces override."""
-    from unittest.mock import patch
-    import iitgpu.wizard as wiz
-
-    stats = _make_stats(gpu_mem_used_mb=12288, gpu_mem_total_mb=32768)
-    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
-         patch("questionary.text") as mock_text, \
-         patch("questionary.confirm") as mock_confirm:
-        mock_text.return_value.ask.return_value = "28"
-        mock_confirm.return_value.ask.return_value = True   # user overrides
-        result = wiz._vram_check("train")
-
-    assert result is True
-
-
-def test_vram_check_skip_when_zero(monkeypatch):
-    """_vram_check returns True immediately when the user enters 0 (skip)."""
-    from unittest.mock import patch
-    import iitgpu.wizard as wiz
-
-    stats = _make_stats(gpu_mem_used_mb=30000, gpu_mem_total_mb=32768)
-    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
-         patch("questionary.text") as mock_text:
-        mock_text.return_value.ask.return_value = "0"
-        result = wiz._vram_check("train")
-
-    assert result is True
-
-
-def test_vram_check_skips_when_stats_unavailable(monkeypatch):
-    """_vram_check returns True (proceed) when GPU stats cannot be read."""
-    from unittest.mock import patch
-    import iitgpu.wizard as wiz
-
+    # …and with no live stats at all, which used to be its own early return.
     with patch("iitgpu.wizard.get_node_stats", return_value=None), \
-         patch("questionary.text") as mock_text:
-        mock_text.return_value.ask.return_value = "20"
-        result = wiz._vram_check("train")
-
-    assert result is True
+         patch("questionary.text", side_effect=_no_prompt), \
+         patch("questionary.confirm", side_effect=_no_prompt):
+        assert wiz._vram_check() is True
 
 
 def test_vram_check_reports_the_fair_share_without_asking(capsys):
@@ -655,7 +501,7 @@ def test_vram_check_reports_the_fair_share_without_asking(capsys):
     stats = _make_stats(gpu_mem_used_mb=0, gpu_mem_total_mb=32768)
     with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
          patch("questionary.text", side_effect=AssertionError):
-        assert wiz._vram_check("inference") is True
+        assert wiz._vram_check() is True
 
     out = " ".join(capsys.readouterr().out.split())   # rich wraps; ignore layout
     assert "about 8 GB" in out
@@ -820,3 +666,181 @@ def test_wizard_hands_off_to_the_hub():
     src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
     assert "run_hub" in src and "default_spec" in src
     assert "recent_scripts" in src and "autocomplete" in src
+
+
+def test_parse_sbatch_handles_a_quoted_script_path():
+    """The wizard shlex.quotes the script path into the sbatch, so a notebook
+    with a space in its name comes back through the rerun parser quoted. A
+    whitespace split hands back "'/a/my" — a path that does not exist, offered
+    to the user as the thing they are about to re-run."""
+    from iitgpu.monitor import _parse_sbatch
+
+    sbatch = (
+        "#!/bin/bash\n"
+        "#SBATCH --partition=gpu\n"
+        "#SBATCH --gres=shard:1\n"
+        "\n"
+        "cd /shared/jobs/alice/train_20260725_120000\n"
+        "python3 '/shared/users/alice/my train.py' --lr 3 --epochs 10\n"
+    )
+    result = _parse_sbatch(sbatch)
+
+    assert result["script_path"] == "/shared/users/alice/my train.py"
+    assert result["extra_args"] == "--lr 3 --epochs 10"
+
+
+def test_parse_sbatch_unquoted_path_still_works():
+    """The common case must not regress: no quotes, no change."""
+    from iitgpu.monitor import _parse_sbatch
+
+    sbatch = ("#!/bin/bash\n"
+              "cd /shared/jobs/alice/j\n"
+              "python3 /shared/users/alice/train.py --epochs 10\n")
+    result = _parse_sbatch(sbatch)
+    assert result["script_path"] == "/shared/users/alice/train.py"
+    assert result["extra_args"] == "--epochs 10"
+
+
+def test_parse_sbatch_survives_unbalanced_quotes():
+    """A hand-edited sbatch must not take the rerun browser down with it."""
+    from iitgpu.monitor import _parse_sbatch
+
+    result = _parse_sbatch("#!/bin/bash\ncd /x\npython3 '/broken/quote.py --lr 3\n")
+    assert "script_path" not in result       # unparseable, so not offered
+    assert result["run_command"].startswith("python3")
+
+
+def test_rerun_prefill_validates_the_script_before_using_it(tmp_path, monkeypatch):
+    """A path lifted out of an old sbatch has had no more validation than a
+    typed one. When it no longer resolves, the wizard must fall through to the
+    normal intake instead of carrying a dead path into the hub."""
+    import iitgpu.wizard as wiz
+
+    monkeypatch.setenv("NFS_ROOT", str(tmp_path))
+    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+
+    asked = []
+
+    def _fake_autocomplete(*a, **kw):
+        asked.append(a[0] if a else "")
+        return MagicMock(ask=lambda: None)      # user cancels the intake
+
+    monkeypatch.setattr("questionary.autocomplete", _fake_autocomplete)
+    monkeypatch.setattr("questionary.select", lambda *a, **kw: MagicMock(ask=lambda: None))
+    monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
+    monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: False))
+
+    reached_hub = []
+    monkeypatch.setattr(wiz, "run_hub", lambda *a, **kw: reached_hub.append(a) or None)
+
+    wiz.run_wizard(prefill={"script_path": "/shared/users/ghost/deleted.py",
+                            "gpu_shards": 1, "cpus": 8, "mem_gb": 14})
+
+    assert asked, "a vanished prefill script must drop into the script intake"
+    assert not reached_hub, "and must not reach the hub carrying the dead path"
+
+
+def test_rerun_prefill_keeps_a_script_that_is_still_there(tmp_path, monkeypatch):
+    """The good case: a script that still exists goes straight to the hub."""
+    import iitgpu.wizard as wiz
+
+    monkeypatch.setenv("NFS_ROOT", str(tmp_path))
+    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+    import getpass
+    udir = tmp_path / "users" / getpass.getuser()
+    udir.mkdir(parents=True)
+    script = udir / "train.py"
+    script.write_text("print(1)\n")
+
+    def _no_intake(*a, **kw):
+        raise AssertionError("a usable prefill script must skip the intake")
+
+    monkeypatch.setattr("questionary.autocomplete", _no_intake)
+    seen = {}
+    monkeypatch.setattr(wiz, "run_hub",
+                        lambda ls, *a, **kw: seen.update(script=ls.script) or None)
+
+    wiz.run_wizard(prefill={"script_path": str(script), "gpu_shards": 1})
+
+    assert seen["script"] == str(script)
+
+
+def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch):
+    """End-to-end through the real run_wizard: intent select -> script intake ->
+    hub, with every prompt driven. Cancels at the hub so nothing is submitted."""
+    import iitgpu.wizard as wiz
+
+    monkeypatch.setenv("NFS_ROOT", str(tmp_path))
+    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+    import getpass
+    udir = tmp_path / "users" / getpass.getuser()
+    udir.mkdir(parents=True)
+    script = udir / "train.py"
+    script.write_text("print('hi')\n")
+
+    batch_label = next(l for k, l in wiz._INTENTS if k == "batch")
+    selects = iter([batch_label, "Cancel"])
+    monkeypatch.setattr("questionary.select",
+                        lambda *a, **kw: MagicMock(ask=lambda: next(selects, None)))
+    monkeypatch.setattr("questionary.autocomplete",
+                        lambda *a, **kw: MagicMock(ask=lambda: str(script)))
+    monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
+    monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: False))
+    monkeypatch.setattr("iitgpu.review.get_node_stats", lambda *a, **kw: None)
+
+    def _never(*a, **kw):
+        raise AssertionError("cancelling at the hub must not submit anything")
+    monkeypatch.setattr(wiz, "submit_job", _never)
+
+    seen = {}
+    real_hub = wiz.run_hub
+    monkeypatch.setattr(wiz, "run_hub",
+                        lambda ls, *a, **kw: seen.update(
+                            script=ls.script, intent=ls.intent,
+                            shards=ls.gpu_shards, time=ls.time_limit)
+                        or real_hub(ls, *a, **kw))
+
+    wiz.run_wizard()
+
+    assert seen["intent"] == "batch"
+    assert seen["script"] == str(script)
+    assert seen["shards"] == 1 and seen["time"] == "04:00:00"   # Standard default
+
+
+def test_other_back_returns_to_the_intent_list_not_out_of_the_wizard(monkeypatch):
+    """"back" that drops you to the main menu is not back, it is cancel. The
+    intent question must be asked again."""
+    import iitgpu.wizard as wiz
+
+    questions = []
+
+    def _sel(question, choices=None, **kw):
+        questions.append(question)
+        # 1st: intent -> Other. 2nd: Other submenu -> back. 3rd: intent -> quit.
+        answers = [wiz._OTHER_CHOICE, "back", None]
+        return MagicMock(ask=lambda: answers[min(len(questions), 3) - 1])
+
+    monkeypatch.setattr("questionary.select", _sel)
+    wiz.run_wizard()
+
+    intent_asked = [q for q in questions if q.startswith("What do you want to do?")]
+    assert len(intent_asked) == 2, f"intent list should come back. Asked: {questions}"
+
+
+def test_other_template_cancel_returns_to_the_intent_list(monkeypatch):
+    """Same for backing out of the template picker."""
+    import iitgpu.wizard as wiz
+
+    questions = []
+
+    def _sel(question, choices=None, **kw):
+        questions.append(question)
+        answers = [wiz._OTHER_CHOICE, "Load a template", None]
+        return MagicMock(ask=lambda: answers[min(len(questions), 3) - 1])
+
+    monkeypatch.setattr("questionary.select", _sel)
+    monkeypatch.setattr("iitgpu.templates.pick_template", lambda cfg: None)
+    wiz.run_wizard()
+
+    intent_asked = [q for q in questions if q.startswith("What do you want to do?")]
+    assert len(intent_asked) == 2, f"intent list should come back. Asked: {questions}"

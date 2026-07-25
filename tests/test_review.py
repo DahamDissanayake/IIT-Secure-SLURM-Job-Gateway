@@ -180,3 +180,97 @@ def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
                      browse_script=lambda: None, browse_data=lambda: None)
     assert result is None
     assert "Pick a script first" in capsys.readouterr().out
+
+
+# ── The hub adapts to the intent ─────────────────────────────────────────────
+
+def _captured_choices(monkeypatch, question_prefix):
+    """Record the choices offered for the first select whose question starts
+    with *question_prefix*, then cancel it."""
+    seen = {}
+
+    def _sel(question, choices=None, **kw):
+        if question.startswith(question_prefix) and "choices" not in seen:
+            seen["choices"] = list(choices or [])
+        return type("A", (), {"ask": lambda self: None})()
+
+    monkeypatch.setattr("questionary.select", _sel)
+    return seen
+
+
+def test_deps_option_offered_for_a_notebook_submitted_as_a_batch_job(monkeypatch):
+    """A .ipynb batch job installs its deps before the first cell runs, exactly
+    as a JupyterLab session does. Gating the option on intent alone made it
+    unreachable for the one flow that renders a pip-install block."""
+    import iitgpu.review as R
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/analysis.ipynb"
+    seen = _captured_choices(monkeypatch, "Data / model")
+    R._edit_data_model(ls, lambda: None, lambda: ("", ""))
+
+    assert any("packages" in c for c in seen["choices"])
+
+
+def test_deps_option_hidden_for_a_plain_script(monkeypatch):
+    import iitgpu.review as R
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/train.py"
+    seen = _captured_choices(monkeypatch, "Data / model")
+    R._edit_data_model(ls, lambda: None, lambda: ("", ""))
+
+    assert not any("packages" in c for c in seen["choices"])
+
+
+def test_deps_option_offered_for_a_jupyterlab_session(monkeypatch):
+    import iitgpu.review as R
+    from iitgpu.launchspec import default_spec
+
+    seen = _captured_choices(monkeypatch, "Data / model")
+    R._edit_data_model(default_spec("notebook"), lambda: None, lambda: ("", ""))
+
+    assert any("packages" in c for c in seen["choices"])
+
+
+def test_hub_hides_script_and_args_for_non_batch_intents(monkeypatch):
+    """A JupyterLab session and a shell have no command line, so a script or an
+    argument row would be a setting that silently does nothing."""
+    import iitgpu.review as R
+    from iitgpu.launchspec import default_spec
+
+    seen = _captured_choices(monkeypatch, "Select:")
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    assert R.run_hub(default_spec("shell"), None, "u",
+                     browse_script=lambda: None, browse_data=lambda: None) is None
+
+    assert "Change args" not in seen["choices"]
+    assert "Change script" not in seen["choices"]
+    assert "🚀 Launch" in seen["choices"]
+
+
+def test_hub_keeps_script_and_args_for_a_batch_job(monkeypatch):
+    import iitgpu.review as R
+    from iitgpu.launchspec import default_spec
+
+    seen = _captured_choices(monkeypatch, "Select:")
+    monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
+    ls = default_spec("batch")
+    ls.script = "/shared/users/u/train.py"
+    assert R.run_hub(ls, None, "u", browse_script=lambda: None,
+                     browse_data=lambda: None) is None
+
+    assert "Change args" in seen["choices"]
+    assert "Change script" in seen["choices"]
+
+
+def test_hub_omits_the_args_row_for_a_session():
+    """And the summary panel agrees with the menu."""
+    from iitgpu.launchspec import default_spec
+
+    assert "Args" not in _plain(render_hub(default_spec("notebook"), None))
+    batch = default_spec("batch")
+    batch.script = "/s/u/train.py"
+    assert "Args" in _plain(render_hub(batch, None))

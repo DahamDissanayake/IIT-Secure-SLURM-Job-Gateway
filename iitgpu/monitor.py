@@ -1,5 +1,6 @@
 # iitgpu/monitor.py
 import getpass
+import shlex
 from pathlib import Path
 
 import questionary
@@ -338,14 +339,19 @@ def _parse_sbatch(sbatch_text: str) -> dict:
             run_cmd = stripped
     if run_cmd:
         result["run_command"] = run_cmd
-        # Extract script path from run_command
-        m = re.match(r"(?:python|python3|bash)\s+(\S+)", run_cmd)
-        if m:
-            result["script_path"] = m.group(1)
-        # Remaining args after the script path
-        parts = run_cmd.split(None, 2)
-        if len(parts) >= 3:
-            result["extra_args"] = parts[2]
+        # Script path and arguments, quote-aware. The wizard shlex.quotes the
+        # script path, so a notebook or script with a space in its name arrives
+        # as `python3 '/a/my train.py' --lr 3`. Splitting on whitespace hands
+        # back "'/a/my" — a path that does not exist, offered to the user as
+        # the thing they are about to re-run.
+        try:
+            parts = shlex.split(run_cmd)
+        except ValueError:          # unbalanced quotes: leave it unparsed
+            parts = []
+        if len(parts) >= 2 and parts[0] in ("python", "python3", "bash"):
+            result["script_path"] = parts[1]
+            if len(parts) > 2:
+                result["extra_args"] = " ".join(shlex.quote(a) for a in parts[2:])
 
     return result
 

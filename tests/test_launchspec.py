@@ -112,3 +112,35 @@ def test_from_rerun_uses_parsed_resources():
                      "time_limit": "01:00:00", "array": "0-9"}, script="/p/s.py")
     assert ls.intent == "batch" and ls.script == "/p/s.py"
     assert ls.cpus == 4 and ls.array == "0-9"
+
+
+def test_from_rerun_carries_environment_data_and_args():
+    """Re-run has to mean re-run. Carrying the sizing but dropping the env, the
+    data path and the arguments produces a job that looks like the original in
+    the queue and does something else entirely."""
+    ls = from_rerun({"gpu_shards": 4, "cpus": 16, "mem_gb": 60,
+                     "conda_env": "/shared/envs/pytorch-cifar",
+                     "data_path": "/shared/users/alice/data",
+                     "extra_args": "--epochs 10 --lr 3e-4"},
+                    script="/shared/users/alice/train.py")
+    assert ls.conda_env == "/shared/envs/pytorch-cifar"
+    assert ls.env_kind == "conda"
+    assert ls.data_path == "/shared/users/alice/data"
+    assert ls.args == "--epochs 10 --lr 3e-4"
+
+
+def test_from_rerun_carries_a_container_image():
+    ls = from_rerun({"container_image": "/shared/images/llm.sif"}, script="/p/s.py")
+    assert ls.container_image == "/shared/images/llm.sif"
+    assert ls.env_kind == "container"
+    assert ls.conda_env == ""
+
+
+def test_from_template_maps_an_interactive_template_to_a_shell():
+    """A saved shell allocation must load as a shell. Loaded as batch it becomes
+    a job with no script — the hub would refuse to launch it, and the user would
+    have no idea why."""
+    ls = from_template({"task_type": "interactive", "gpu_shards": 1,
+                        "cpus": 8, "mem_gb": 14, "time_limit": "02:00:00"})
+    assert ls.intent == "shell"
+    assert ls.time_limit == "02:00:00"

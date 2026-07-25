@@ -155,8 +155,14 @@ def recent_scripts(jobs_dir: str, user: str, limit: int = 5) -> list[str]:
     return seen
 
 
+# A template stores the JobSpec's task_type, which is the internal label, not
+# the intent the user picked. "interactive" is a shell allocation — loading one
+# as a batch job would silently turn a saved shell into a job that runs nothing.
+_TEMPLATE_INTENT = {"notebook": "notebook", "interactive": "shell"}
+
+
 def from_template(tdata: dict) -> LaunchSpec:
-    intent = "notebook" if tdata.get("task_type") == "notebook" else "batch"
+    intent = _TEMPLATE_INTENT.get(tdata.get("task_type", ""), "batch")
     ls = default_spec(intent)
     for f_ in ("conda_env", "venv_path", "container_image", "data_path",
                "model_path", "array", "dependency"):
@@ -175,12 +181,27 @@ def from_template(tdata: dict) -> LaunchSpec:
 
 
 def from_rerun(parsed: dict, script: str) -> LaunchSpec:
+    """Rebuild a launch from a previous job's parsed sbatch.
+
+    "Re-run" has to mean re-run: carrying the sizing but dropping the
+    environment, the data path and the arguments produces a job that looks like
+    the original in the queue and does something else entirely.
+    """
     ls = default_spec("batch")
     ls.script = script
     for f_ in ("gpu_shards", "cpus", "mem_gb"):
         if parsed.get(f_) is not None:
             setattr(ls, f_, int(parsed[f_]))
-    for f_ in ("time_limit", "array", "dependency"):
+    for f_ in ("time_limit", "array", "dependency",
+               "conda_env", "venv_path", "container_image", "data_path"):
         if parsed.get(f_):
             setattr(ls, f_, parsed[f_])
+    if parsed.get("extra_args"):
+        ls.args = parsed["extra_args"]
+    if ls.container_image:
+        ls.env_kind = "container"
+    elif ls.conda_env:
+        ls.env_kind = "conda"
+    elif ls.venv_path:
+        ls.env_kind = "venv"
     return ls

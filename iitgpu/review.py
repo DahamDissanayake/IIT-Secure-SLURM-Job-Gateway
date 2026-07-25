@@ -47,9 +47,11 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
         ("Size", f"{size_label(ls)}   [dim]{size_availability(ls.gpu_shards, stats)}[/]"),
         ("Time limit", _fmt_time(ls.time_limit)),
         ("Data / model", escape(ls.data_path or ls.model_path or "(none)")),
-        ("Args", escape(ls.args or "(none)")),
-        ("Advanced", "on" if (ls.array or ls.dependency or not ls.mail) else "off"),
     ]
+    if ls.intent == "batch":   # nothing else has a command line to carry args
+        rows.append(("Args", escape(ls.args or "(none)")))
+    rows.append(
+        ("Advanced", "on" if (ls.array or ls.dependency or not ls.mail) else "off"))
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
     share = gpu_share_note(ls.gpu_shards)
     vram = ("GPU memory is shared between jobs and not enforced — "
@@ -128,10 +130,16 @@ def _edit_env(ls: LaunchSpec, cfg) -> None:
         ls.env_kind = "none"
 
 
+def _wants_deps(ls: LaunchSpec) -> bool:
+    """Both notebook shapes install deps before the first cell runs: the live
+    JupyterLab session, and a .ipynb submitted as a batch job."""
+    return ls.intent == "notebook" or ls.script.endswith(".ipynb")
+
+
 def _edit_data_model(ls: LaunchSpec, browse_data, deps_prompt) -> None:
     opts = ["data folder (browse)", "clear data", "model path (text)", "clear model"]
-    if ls.intent == "notebook" and deps_prompt is not None:
-        opts.append("python packages for this session")
+    if _wants_deps(ls) and deps_prompt is not None:
+        opts.append("python packages to pre-install")
     sel = questionary.select("Data / model:", choices=opts + ["back"]).ask()
     if sel == "data folder (browse)":
         picked = browse_data()
@@ -143,7 +151,7 @@ def _edit_data_model(ls: LaunchSpec, browse_data, deps_prompt) -> None:
         ls.model_path = questionary.text("Model path (or HF repo id):").ask() or ls.model_path
     elif sel == "clear model":
         ls.model_path = ""
-    elif sel == "python packages for this session":
+    elif sel == "python packages to pre-install":
         req, pkgs = deps_prompt()
         ls.requirements, ls.packages = req, pkgs
 
@@ -197,8 +205,12 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
         except Exception:
             pass
         console.print(render_hub(ls, stats))
+        # Script and args only exist for a batch job — a JupyterLab session or a
+        # shell has no command line to put them on, so offering the rows would
+        # be offering a setting that silently does nothing.
         choices = [c for c in _HUB_CHOICES
-                   if not (c == "Change script" and ls.intent != "batch")]
+                   if not (c in ("Change script", "Change args")
+                           and ls.intent != "batch")]
         sel = questionary.select("Select:", choices=choices).ask()
         if sel is None or sel == "Cancel":
             return None

@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import getpass
-import grp
 import os
 import re
 import shlex
 import shutil
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import questionary
@@ -24,14 +22,6 @@ from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
 from iitgpu.ui import err, header, info, kv, ok, panel, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
-
-
-def _cluster_tz():
-    try:
-        from iitgpu.config import cluster_tz
-        return cluster_tz()
-    except Exception:
-        return timezone(timedelta(hours=5, minutes=30))
 
 
 _STYLE = Style([
@@ -196,107 +186,6 @@ def _browse_data_folder(start_dir: str, jail=in_jail) -> str | None:
             continue
 
 
-def _ensure_scripts_dir(cfg, user: str) -> str | None:
-    """Create /shared/users/<user>/scripts/ with 0o770 + gpuusers gid, return path."""
-    scripts_dir = Path(user_dir(cfg, user)) / "scripts"
-    dest = str(scripts_dir)
-    if not in_jail(dest):
-        warn("Scripts directory is outside the allowed jail.")
-        return None
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    scripts_dir.chmod(0o770)
-    try:
-        gid = grp.getgrnam(cfg.gpuusers_group).gr_gid
-        os.chown(dest, -1, gid)
-    except (KeyError, PermissionError, OSError):
-        pass
-    return dest
-
-
-def _inline_paste(cfg, user: str) -> tuple[str | None, str | None]:
-    """Collect pasted data, write to /shared/users/<user>/data/<ts>_inline.txt.
-
-    Returns (data_path, script_path_or_None).
-    script_path is non-None only if user agrees to use generated script as job.
-    """
-    info("Paste your data below. When finished, enter a line containing only EOF and press Enter.")
-    lines = []
-    try:
-        while True:
-            line = input()
-            if line == "EOF":
-                break
-            lines.append(line)
-    except EOFError:
-        pass
-
-    if not lines:
-        warn("No data pasted.")
-        return None, None
-
-    ts = datetime.now(_cluster_tz()).strftime("%Y%m%d_%H%M%S")
-    data_subdir = Path(user_dir(cfg, user)) / "data"
-    data_subdir.mkdir(parents=True, exist_ok=True)
-    data_dest = str(data_subdir / f"{ts}_inline.txt")
-
-    if not in_jail(data_dest):
-        err("Data destination is outside the allowed jail — refused.")
-        return None, None
-
-    content = "\n".join(lines) + "\n"
-    Path(data_dest).write_text(content)
-    Path(data_dest).chmod(0o644)
-    auditclient.log("data_inline_paste", detail=Path(data_dest).name,
-                    meta={"path": data_dest, "bytes": len(content.encode())})
-    ok(f"Saved {len(lines)} lines to {data_dest}")
-
-    script_path: str | None = None
-    if questionary.confirm(
-        "Create a Python script to load this data?", default=True, style=_STYLE
-    ).ask():
-        scripts_dir = _ensure_scripts_dir(cfg, user)
-        if scripts_dir:
-            script_dest = str(Path(scripts_dir) / f"{ts}_load_data.py")
-            if not in_jail(script_dest):
-                warn("Script destination is outside the allowed jail — skipping.")
-            else:
-                loader = (
-                    "#!/usr/bin/env python3\n"
-                    "# Auto-generated data loader — edit as needed\n"
-                    "# Data file: " + data_dest + "\n"
-                    "\n"
-                    "import os\n"
-                    "\n"
-                    "DATA_PATH = os.environ.get(\"DATA_PATH\", \"" + data_dest + "\")\n"
-                    "\n"
-                    "\n"
-                    "def load_data():\n"
-                    "    with open(DATA_PATH, \"r\") as f:\n"
-                    "        content = f.read()\n"
-                    "    lines = content.splitlines()\n"
-                    "    print(f\"Loaded {len(lines)} lines from {DATA_PATH}\")\n"
-                    "    print(\"First 5 lines:\")\n"
-                    "    for line in lines[:5]:\n"
-                    "        print(f\"  {line}\")\n"
-                    "    return content\n"
-                    "\n"
-                    "\n"
-                    "if __name__ == \"__main__\":\n"
-                    "    data = load_data()\n"
-                )
-                Path(script_dest).write_text(loader)
-                Path(script_dest).chmod(0o644)
-                auditclient.log("script_generated", detail=script_dest)
-                ok(f"Loader script saved to {script_dest}")
-                if questionary.confirm(
-                    "Use this generated script as your job script?",
-                    default=True, style=_STYLE,
-                ).ask():
-                    script_path = script_dest
-
-    return data_dest, script_path
-
-
 def _validate_and_show_errors(script_text: str, username: str, cfg) -> bool:
     """Run validate_sbatch; print errors and return False if any found."""
     from iitgpu.validate import validate_sbatch
@@ -367,7 +256,7 @@ def _tier3_own_script(username: str, cfg) -> str | None:
         return text
 
 
-def _vram_check(task_type: str = "") -> bool:
+def _vram_check() -> bool:
     """State the VRAM situation at submit time. Asks nothing, blocks nothing.
 
     This used to interrogate the user for an estimate and refuse the job when
@@ -567,11 +456,32 @@ def _job_name_for(ls: LaunchSpec) -> str:
     return {"notebook": "notebook", "shell": "interactive"}.get(ls.intent, "job")
 
 
+def _usable_script(path: str, browse_jail) -> bool:
+    """The three things that must hold before we run a path: it is a kind of file
+    we know how to run, it is inside the caller's allowed directories, and it is
+    actually there.
+
+    Shared by the typed intake and the rerun prefill on purpose — a path lifted
+    out of a months-old sbatch on disk has had no more validation than one
+    somebody just typed, and rather less recency.
+    """
+    if not path.endswith(_BATCH_EXTS):
+        warn(f"Not a runnable script. Allowed: {', '.join(_BATCH_EXTS)}")
+        return False
+    if not browse_jail(path):
+        warn("That path is outside the directories you are allowed to use.")
+        return False
+    if not Path(path).is_file():
+        warn(f"No such file: {path}")
+        return False
+    return True
+
+
 def _pick_batch_script(jdir: str, user: str, browse_jail, start_dir: str) -> str | None:
     """Type a path or pick a recent one — the batch flow's only required question.
 
-    Typed input skips the browser, so the jail, the extension and the file's
-    existence are all re-checked here: this is the boundary, not the browser.
+    Typed input skips the browser, so validation happens here: this is the
+    boundary, not the browser.
     """
     choices = recent_scripts(jdir, user) + ["[browse…]"]
     for _ in range(6):
@@ -589,14 +499,7 @@ def _pick_batch_script(jdir: str, user: str, browse_jail, start_dir: str) -> str
             if picked is None:
                 return None
             raw = picked
-        if not raw.endswith(_BATCH_EXTS):
-            warn(f"Not a runnable script. Allowed: {', '.join(_BATCH_EXTS)}")
-            continue
-        if not browse_jail(raw):
-            warn("That path is outside the directories you are allowed to use.")
-            continue
-        if not Path(raw).is_file():
-            warn(f"No such file: {raw}")
+        if not _usable_script(raw, browse_jail):
             continue
         return raw
     return None
@@ -641,12 +544,21 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
     header("New Job")
 
     # ── Intake ───────────────────────────────────────────────────────────────
+    ls: LaunchSpec | None = None
     if prefill:
         # Re-run: the previous job's own sbatch is the source of truth for
         # sizing; the hub is where anything about it gets changed.
         ls = from_rerun(prefill, prefill.get("script_path", ""))
         info("Pre-filled from the previous run — change anything below.")
-    else:
+        # The script path came out of a file on disk, not out of this session:
+        # the job may have been archived, renamed, or written by hand. Anything
+        # that fails the same checks a typed path faces drops through to the
+        # normal intake rather than being launched on trust.
+        if ls.script and not _usable_script(ls.script, _browse_jail):
+            warn(f"The previous script is no longer usable: {ls.script}")
+            ls.script = ""
+
+    while ls is None:
         choice = questionary.select(
             "What do you want to do?",
             choices=[label for _, label in _INTENTS]
@@ -656,27 +568,30 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         if choice is None:
             return
 
-        if choice == _OTHER_CHOICE:
-            sub = questionary.select(
-                "Other:",
-                choices=["Submit my own .sbatch", "Load a template", "back"],
-                style=_STYLE,
-            ).ask()
-            if sub == "Submit my own .sbatch":
-                _run_own_sbatch(cfg, user, jdir)
-                return
-            if sub != "Load a template":
-                return
-            from iitgpu.templates import pick_template
-            tdata = pick_template(cfg)
-            if not tdata:
-                return
-            ls = from_template(tdata)
-        else:
+        if choice != _OTHER_CHOICE:
             intent = next((k for k, label in _INTENTS if label == choice), None)
             if intent is None:
                 return
             ls = default_spec(intent)
+            break
+
+        sub = questionary.select(
+            "Other:",
+            choices=["Submit my own .sbatch", "Load a template", "back"],
+            style=_STYLE,
+        ).ask()
+        if sub == "Submit my own .sbatch":
+            _run_own_sbatch(cfg, user, jdir)
+            return
+        if sub is None:
+            return
+        if sub == "back":
+            continue                      # back to the intent list, not out
+        from iitgpu.templates import pick_template
+        tdata = pick_template(cfg)
+        if not tdata:
+            continue                      # nothing picked — still in the wizard
+        ls = from_template(tdata)
 
     if ls.intent == "notebook":
         ls.port = 8888
@@ -772,7 +687,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             requirements=ls.requirements, packages=ls.packages,
         )
         info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
-        _vram_check(task_type)
+        _vram_check()
         panel("Generated notebook sbatch script", script_text)
 
         if not questionary.confirm(
@@ -814,6 +729,10 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         else:
             err(f"Submission failed: {result}")
             auditclient.log("notebook_submit_failed", detail=result)
+            # Nothing ran and nothing ever will, so nothing will write here.
+            # Leaving the folder behind puts a job in the dashboard's listing
+            # that does not exist — the declined paths above already know this.
+            shutil.rmtree(folder, ignore_errors=True)
         return
 
     # ── Batch: a script or notebook, run to completion ───────────────────────
@@ -842,7 +761,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         f"  Model path : {spec.model_path or 'not set'}"
     ))
     panel("Generated sbatch script", script_text)
-    _vram_check(task_type)
+    _vram_check()
 
     if not questionary.confirm("Submit this job?", default=True, style=_STYLE).ask():
         shutil.rmtree(folder, ignore_errors=True)
