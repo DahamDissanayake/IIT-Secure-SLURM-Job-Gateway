@@ -478,6 +478,41 @@ def _vram_check(task_type: str) -> bool:
     return True
 
 
+def _post_submit_notebook(job_id: str, folder: str) -> None:
+    """Wait for the job's readiness marker, then show the Connect card.
+
+    The card is parsed from the job's own stdout — the authoritative source —
+    so it cannot disagree with what the server actually bound.
+    """
+    from iitgpu.connect import parse_connect, render_card, wait_ready
+    from iitgpu.slurm import queue as _q
+    from iitgpu.ui import console as _con
+
+    def _alive() -> bool:
+        return any(e.job_id == str(job_id) and e.state in ("PENDING", "RUNNING")
+                   for e in _q(all_users=True))
+
+    info("Starting JupyterLab… (this can take a minute on first launch)")
+    state = wait_ready(folder, is_alive=_alive, timeout=90)
+    outs = sorted(Path(folder).glob("slurm-*.out"))
+    out_text = outs[-1].read_text() if outs else ""
+    cinfo = parse_connect(out_text)
+    if state == "ready" and cinfo:
+        _con.print(render_card(cinfo))
+        return
+    if state == "gone":
+        err("The job ended before JupyterLab came up. Last output:")
+        for line in out_text.splitlines()[-15:]:
+            info(f"  {line}")
+        return
+    warn("Still starting after 90s (large envs can be slow).")
+    if cinfo:
+        _con.print(render_card(cinfo))
+        info("The tunnel may not answer until the dashboard shows RUNNING.")
+    else:
+        info("Watch it in the dashboard — press T on the job for the Connect card.")
+
+
 def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity ok for a wizard)
     cfg = load_config()
     jdir = jobs_dir(cfg)
@@ -918,10 +953,6 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
         success, result = submit_job(sbatch_path)
         if success:
             ok(f"Notebook job submitted! ID: {result}  ({nb_hours}h session)")
-            info("JupyterLab binds to the compute node's internal IP (resolved at runtime).")
-            info("The exact SSH tunnel command is printed in the job's output once it starts:")
-            info(f"  squeue --job {result}   (check state)  |  look at the job log for the tunnel line")
-            info(f"  Tunnel shape:  ssh -p {cfg.gateway_port} -L <port>:<node-ip>:<port> {user}@{cfg.gateway_host}")
             auditclient.log("notebook_submitted_ok", detail=job_name, job_id=result)
             auditclient.log(
                 "notebook_session_start",
@@ -930,14 +961,15 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (complexity o
                 meta={"env": spec.conda_env or spec.container_image or "system",
                       "gpu_shards": spec.gpu_shards},
             )
+            _post_submit_notebook(result, folder)
             if questionary.confirm(
-                "Watch job output now for the tunnel command?", default=True, style=_STYLE
+                "Watch job output now?", default=False, style=_STYLE
             ).ask():
                 try:
                     from iitgpu.dashboard import run_dashboard
                     run_dashboard(job_id=result)
                 except ImportError:
-                    info("Live dashboard not available. Check job output with: squeue && cat <log>")
+                    info("Live dashboard not available.")
         else:
             err(f"Submission failed: {result}")
             auditclient.log("notebook_submit_failed", detail=result)

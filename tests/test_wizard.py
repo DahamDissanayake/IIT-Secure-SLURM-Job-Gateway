@@ -684,3 +684,15 @@ def test_notebook_submit_audits_the_interactive_session():
     window = src[idx - 200:idx + 300]
     assert "gpu_shards" in window, "record the slice the session holds"
     assert "job_id" in window, "record which job the session is"
+
+
+def test_notebook_post_submit_waits_and_shows_connect_card():
+    """After submit the TUI must wait for readiness and print the Connect card
+    parsed from the job's own output — not reconstruct tunnel details."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    assert "_post_submit_notebook" in src
+    i = src.index("def _post_submit_notebook")
+    body = src[i:i + 2500]
+    assert "wait_ready" in body and "parse_connect" in body and "render_card" in body
+    assert "gone" in body and "timeout" in body  # both failure states handled
