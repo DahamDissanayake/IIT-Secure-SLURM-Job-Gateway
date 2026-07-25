@@ -11,6 +11,19 @@ ADMIN_GROUP="${ADMIN_GROUP:-gpuadmins}"
 SHARED_DIRS="${SHARED_DIRS:-data datasets envs models templates}"
 fail=0
 
+# The server is the host where the real path backing /shared exists as an
+# actual directory. On the GPU host (the NFS server) that's true; on the
+# login node /shared is only an NFS mount, so its attribute cache can lag
+# the server by its acdirmin/acdirmax window (up to ~60s here).
+if [ -d /mnt/nvme_storage/shared ]; then
+    AUTHORITATIVE=1
+else
+    AUTHORITATIVE=0
+    echo "NOTE: reading /shared over NFS — directory attributes may lag the server by"
+    echo "      up to ~60s, so a very recent change may not be visible yet. The"
+    echo "      authoritative check runs on the GPU host (the NFS server)."
+fi
+
 for base in users jobs; do
     [ -d "$NFS_ROOT/$base" ] || continue
     for d in "$NFS_ROOT/$base"/*; do
@@ -46,4 +59,8 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-echo "shared permissions OK"
+if [ "$AUTHORITATIVE" -eq 1 ]; then
+    echo "shared permissions OK"
+else
+    echo "shared permissions OK (as seen over NFS — see NOTE above)"
+fi
