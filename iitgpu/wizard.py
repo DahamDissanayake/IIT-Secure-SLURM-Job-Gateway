@@ -448,6 +448,11 @@ def _run_own_sbatch(cfg, user: str, jdir: str) -> None:
     if success:
         ok(f"Job submitted! ID: {result}")
         auditclient.log("job_submitted_ok", detail="custom", job_id=result)
+        try:
+            from iitgpu.dashboard import run_dashboard
+            run_dashboard(job_id=result)
+        except ImportError:
+            info("Live dashboard not available. Check job output manually.")
     else:
         err(f"Submission failed: {result}")
         auditclient.log("job_submit_failed", detail=result)
@@ -829,14 +834,11 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
                       "gpu_shards": spec.gpu_shards},
             )
             _post_submit_notebook(result, folder)
-            if questionary.confirm(
-                "Watch job output now?", default=False, style=_STYLE
-            ).ask():
-                try:
-                    from iitgpu.dashboard import run_dashboard
-                    run_dashboard(job_id=result)
-                except ImportError:
-                    info("Live dashboard not available.")
+            try:
+                from iitgpu.dashboard import run_dashboard
+                run_dashboard(job_id=result)
+            except ImportError:
+                info("Live dashboard not available.")
         else:
             err(f"Submission failed: {result}")
             auditclient.log("notebook_submit_failed", detail=result)
@@ -909,24 +911,11 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         auditclient.log("job_submitted_ok", detail=job_name, job_id=result)
         if spec.mail_user:
             info(f"SLURM will email [cyan]{spec.mail_user}[/] when the job ends.")
-        if questionary.confirm(
-            "Watch live output now?", default=True, style=_STYLE
-        ).ask():
-            try:
-                from iitgpu.dashboard import run_dashboard
-                run_dashboard(job_id=result)
-            except ImportError:
-                info("Live dashboard not available. Check job output manually.")
-        elif questionary.confirm(
-            "Wait here for the result? (silent poll)", default=False, style=_STYLE
-        ).ask():
-            from iitgpu.notify import poll_until_done
-            info("Waiting for the job to finish (Ctrl-C to stop waiting)…")
-            try:
-                final = poll_until_done(result, interval=10)
-                ok(f"Job {result} finished: {final}")
-            except KeyboardInterrupt:
-                info("Stopped waiting (job keeps running).")
+        try:
+            from iitgpu.dashboard import run_dashboard
+            run_dashboard(job_id=result)
+        except ImportError:
+            info("Live dashboard not available. Check job output manually.")
     else:
         err(f"Submission failed: {result}")
         auditclient.log("job_submit_failed", detail=result)

@@ -971,3 +971,54 @@ def test_wait_or_keypress_returns_bool_without_a_tty(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr("time.sleep", lambda s: None)
     assert W._wait_or_keypress(0.01) is False
+
+
+def test_own_sbatch_auto_opens_the_dashboard_no_confirm(monkeypatch, tmp_path):
+    """Every job type auto-directs to the live dashboard after submit — no
+    'watch now?' gate. Deliberately does NOT mock questionary.confirm: if a
+    confirm gate were still in the code path, calling .ask() on the real
+    (un-mocked) prompt in a non-interactive test run raises, so this proves
+    the gate is gone structurally, not just that its old text is absent."""
+    import iitgpu.wizard as wiz
+
+    monkeypatch.setattr(wiz, "_tier3_own_script", lambda user, cfg: "#!/bin/bash\necho hi\n")
+    monkeypatch.setattr(wiz.auditclient, "log_or_block", lambda *a, **kw: True)
+    monkeypatch.setattr(wiz.auditclient, "log", lambda *a, **kw: None)
+    monkeypatch.setattr(wiz, "submit_job", lambda path: (True, "999"))
+
+    seen = {}
+    monkeypatch.setattr(wiz, "make_job_folder", lambda jdir, spec: str(tmp_path))
+
+    class _FakeDashboardModule:
+        @staticmethod
+        def run_dashboard(job_id=None):
+            seen["job_id"] = job_id
+
+    monkeypatch.setitem(__import__("sys").modules, "iitgpu.dashboard", _FakeDashboardModule)
+
+    cfg = type("FakeCfg", (), {"partition": "gpu"})()
+    wiz._run_own_sbatch(cfg, "u", str(tmp_path))
+
+    assert seen.get("job_id") == "999"
+
+
+def test_batch_submit_success_reaches_dashboard_with_no_confirm_between():
+    """The audit-success line and the dashboard launch must be adjacent, with
+    no questionary.confirm() gate in between — a structural check, not a
+    grep for the old prompt's wording."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    i = src.index('auditclient.log("job_submitted_ok", detail=job_name, job_id=result)')
+    j = src.index("run_dashboard(job_id=result)", i)
+    between = src[i:j]
+    assert "questionary.confirm" not in between
+    assert "poll_until_done" not in between
+
+
+def test_notebook_submit_success_reaches_dashboard_with_no_confirm_between():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    i = src.index("_post_submit_notebook(result, folder)")
+    j = src.index("run_dashboard(job_id=result)", i)
+    between = src[i:j]
+    assert "questionary.confirm" not in between
