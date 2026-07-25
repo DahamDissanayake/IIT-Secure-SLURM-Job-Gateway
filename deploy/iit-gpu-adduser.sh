@@ -98,12 +98,20 @@ fi
 ok "login: $USERNAME created"
 
 # ── 3. Create on GPU host (same UID) ───────────────────────────────────────────
+# --admin must also join $ADMIN_GROUP HERE, not just on the login node: jobs and
+# notebooks run on the GPU host, and per-user areas there are group $ADMIN_GROUP
+# (2770). An admin who is only in the group on the login node sees the admin
+# panel but cannot read any user's area from a job/notebook — the login-node
+# membership doesn't reach the host where the data actually lives.
 step "Creating $USERNAME on GPU host ($GPU_HOST_SSH) ..."
 if [ "$SHELL_USER" = 0 ]; then
     run "ssh $GPU_HOST_SSH \"sudo groupadd -g $NEW_UID $USERNAME 2>/dev/null || true; \
         sudo useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || true; \
         sudo chown -R $NEW_UID:$NEW_UID /home/$USERNAME; \
         sudo usermod -aG $GPUUSERS_GROUP $USERNAME\""
+    if [ "$ADMIN" = 1 ]; then
+        run "ssh $GPU_HOST_SSH \"getent group $ADMIN_GROUP >/dev/null 2>&1 && sudo usermod -aG $ADMIN_GROUP $USERNAME || true\""
+    fi
 else
     run "ssh $GPU_HOST_SSH \"sudo groupadd -g $NEW_UID $USERNAME 2>/dev/null || true; \
         sudo useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || true; \
@@ -122,10 +130,20 @@ ok "SLURM: $USERNAME → account=$SLURM_ACCOUNT qos=$SLURM_QOS"
 # would be squashed to nobody and fail. Mode 2770 group $ADMIN_GROUP means the
 # owner and admins can reach the area and nobody else can; setgid keeps that
 # group on anything created inside. Shell users get the same treatment.
-step "Creating $NFS_ROOT/users/$USERNAME on the NFS server (GPU host) ..."
+#
+# Also provision $NFS_ROOT/jobs/$USERNAME here, same ownership/mode. Nothing
+# else creates it ahead of time: make_job_folder() only mkdir(parents=True)s a
+# job folder as a side effect, which (absent this) inherits group $GPUUSERS_GROUP
+# from the jobs/ parent instead of $ADMIN_GROUP, and the user isn't a member of
+# $ADMIN_GROUP to fix it themselves — so their very first job becomes readable
+# and writable by every cluster user.
+step "Creating $NFS_ROOT/users/$USERNAME and $NFS_ROOT/jobs/$USERNAME on the NFS server (GPU host) ..."
 run "ssh $GPU_HOST_SSH \"sudo mkdir -p $NFS_ROOT/users/$USERNAME && \
     sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/users/$USERNAME && \
-    sudo chmod 2770 $NFS_ROOT/users/$USERNAME\""
+    sudo chmod 2770 $NFS_ROOT/users/$USERNAME && \
+    sudo mkdir -p $NFS_ROOT/jobs/$USERNAME && \
+    sudo chown $NEW_UID:$ADMIN_GROUP $NFS_ROOT/jobs/$USERNAME && \
+    sudo chmod 2770 $NFS_ROOT/jobs/$USERNAME\""
 
 # Shell users get ~/shared → NFS root so they can reach datasets, models, envs,
 # AND their private area at ~/shared/users/<user> in one place.
