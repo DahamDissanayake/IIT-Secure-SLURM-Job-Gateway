@@ -104,6 +104,8 @@ def user_browse_roots(nfs_root: str, username: str) -> list[str]:
         str(Path(base) / "users" / username),
         str(Path(base) / "models"),
         str(Path(base) / "envs"),
+        str(Path(base) / "data"),
+        str(Path(base) / "datasets"),
     ]
 
 

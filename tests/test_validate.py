@@ -317,3 +317,19 @@ def test_validate_sbatch_ignores_indented_sbatch(tmp_path):
     """Indented #SBATCH is ignored by SLURM and by us (no false positive)."""
     _user_dir(tmp_path)
     assert _v("   #SBATCH --output=/etc/x\n", tmp_path) == []
+
+
+def test_browse_roots_include_shared_datasets():
+    """File manager and notebook must expose the same boundary."""
+    from iitgpu.validate import user_browse_roots
+    roots = user_browse_roots("/shared", "yenuli")
+    assert "/shared/users/yenuli" in roots
+    for shared in ("/shared/models", "/shared/envs", "/shared/data", "/shared/datasets"):
+        assert shared in roots, f"{shared} must be browsable"
+
+
+def test_browse_roots_exclude_other_users_and_jobs():
+    from iitgpu.validate import user_browse_roots
+    roots = user_browse_roots("/shared", "yenuli")
+    assert "/shared/users" not in roots
+    assert "/shared/jobs" not in roots
