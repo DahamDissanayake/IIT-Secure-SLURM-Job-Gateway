@@ -13,6 +13,11 @@ SHARED_DIRS="${SHARED_DIRS:-data datasets envs models templates}"
 getent group "$ADMIN_GROUP" >/dev/null || { echo "ERROR: group $ADMIN_GROUP missing" >&2; exit 1; }
 command -v setfacl >/dev/null || { echo "ERROR: setfacl not found (package acl) — required, see comment below" >&2; exit 1; }
 
+echo "== $NFS_ROOT itself -> 2775 (group writable, other read-only)"
+# check-shared-perms.sh fails the deploy if $NFS_ROOT itself is writable by
+# "other" and tells the operator to run this script. Make that true.
+chmod 2775 "$NFS_ROOT"
+
 echo "== shared assets -> 2775 (group writable, other read-only) -- top level only,"
 echo "   contents underneath are NOT touched (see check-shared-perms.sh header)"
 for d in $SHARED_DIRS; do
@@ -24,20 +29,28 @@ for d in $SHARED_DIRS; do
 done
 
 echo "== per-user areas -> 2770 owner:$ADMIN_GROUP + $ADMIN_GROUP ACL"
-# WHY ACLs, not just chown/chmod: on this NFS export, POSIX group permissions
-# do NOT govern access -- default ACLs do, and stat(1)/mode bits actively
-# conceal that. Verified live: a directory reporting `group=gpuadmins
-# mode=660` had ACL entry `group::---` -- the owning GROUP had NO access,
-# only users named explicitly in the ACL could get in. setgid is also NOT
-# inherited on this share (same mkdir, same non-admin user: on /tmp a 2770
-# parent yields a 2770 child; on /shared it yields 5770/1770, no setgid), so
-# there is no umask/chmod trick that reaches the admin group here either.
-# `chown ... :$ADMIN_GROUP` + `chmod 2770` alone therefore produces exactly
-# the state that LOOKS correct under `stat` while admins are actually locked
-# out. The explicit ACL below is what actually grants access, and the
-# default (d:) entry is what makes it survive future writes into the area.
-# Do NOT "simplify" this back to chown/chmod only -- that regression is the
-# whole reason this comment exists.
+# WHY both chown/chmod AND an ACL: setgid IS inherited normally on this NFS
+# export -- a 2770 <user>:$ADMIN_GROUP parent produces 2770 children, and
+# files written inside them pick up group $ADMIN_GROUP, the same as on any
+# local filesystem. (An earlier note here claimed setgid inheritance was
+# broken on this share; that was a measurement artifact of this host's
+# `mkdir` binary -- uutils coreutils 0.8.0 -- mishandling ACL-bearing parent
+# directories. Checked against the raw syscall, `python3 -c "import os;
+# os.mkdir(...)"`, setgid inherits fine. See iitgpu/jobs.py make_job_folder
+# for the live comparison. On this host, verify mode-bit behaviour with a
+# raw syscall, not a coreutils binary.) So `chown ... :$ADMIN_GROUP` +
+# `chmod 2770` does grant $ADMIN_GROUP real access via ordinary POSIX group
+# bits.
+#
+# The ACL below is a second, independent layer: `stat`/mode bits can still
+# mislead a reader once a directory carries an extended ACL -- verified
+# live, a directory reporting `group=gpuadmins mode=660` had ACL entry
+# `group::---` (the "group" column `stat` shows in that case is the ACL
+# mask, not the literal group:: permissions). The explicit ACL is what
+# deploy/check-shared-perms.sh actually verifies, so it catches that class
+# of drift even when the mode bits alone look fine. The default (d:) entry
+# is what makes the ACL survive future writes into the area. Keep both
+# layers -- don't drop the ACL step even though setgid also grants access.
 for base in users jobs; do
     [ -d "$NFS_ROOT/$base" ] || continue
     for p in "$NFS_ROOT/$base"/*; do
