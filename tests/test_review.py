@@ -312,3 +312,33 @@ def test_hub_vram_line_claims_no_number_without_live_stats():
     assert "shared" in out.lower() and "not enforced" in out.lower()
     assert "GB of" not in out
     assert "8 GB" not in out
+
+
+def test_edit_time_rejects_eight_thirty(monkeypatch):
+    """I5: 8:30 is 500 minutes. The old hours>8 check let it through and the
+    QOS (MaxWallDurationPerJob=08:00:00, DenyOnLimit) rejected it at sbatch."""
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    before = ls.time_limit
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("8:30"))
+    R._edit_time(ls)
+    assert ls.time_limit == before
+
+
+def test_edit_time_accepts_exactly_the_cluster_maximum(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("8:00"))
+    R._edit_time(ls)
+    assert ls.time_limit == "08:00:00"
+
+
+def test_edit_time_accepts_just_under_the_maximum(monkeypatch):
+    import iitgpu.review as R
+    ls = default_spec("batch")
+    monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
+    monkeypatch.setattr(R.questionary, "text", _Fixed("7:59"))
+    R._edit_time(ls)
+    assert ls.time_limit == "07:59:00"

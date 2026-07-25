@@ -107,10 +107,18 @@ def _edit_time(ls: LaunchSpec) -> None:
         warn("Not HH:MM — keeping the current limit.")
         return
     hours, mins = int(m.group(1)), int(m.group(2))
-    if mins >= 60 or (hours == 0 and mins == 0):
+    if mins >= 60:
         warn("Not HH:MM — keeping the current limit.")
         return
-    if hours > 8:
+    # The cap is on the total, not on the hours: QOS `normal` carries
+    # MaxWallDurationPerJob=08:00:00 with Flags=DenyOnLimit, so "8:30" is 500
+    # minutes and sbatch rejects it outright — after the job folder exists and
+    # with no error text that points at the time limit.
+    total_minutes = hours * 60 + mins
+    if total_minutes == 0:
+        warn("Not HH:MM — keeping the current limit.")
+        return
+    if total_minutes > 480:
         warn("Max is 8h (cluster QOS limit) — keeping the current limit.")
         return
     ls.time_limit = f"{hours:02d}:{mins:02d}:00"
