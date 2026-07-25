@@ -14,7 +14,7 @@ _STYLE = Style([
 ])
 
 _MAIN_ITEMS = [
-    "1. New Job       (environment + data + model + script + submit)",
+    "1. New Job       (JupyterLab, script, or shell — pick, review, launch)",
     "2. My Workspace  (files, models, environments)",
     "3. Jobs          (queue, history, logs, rerun)",
     "4. Settings      (health check, shell, cluster status, hardware)",
