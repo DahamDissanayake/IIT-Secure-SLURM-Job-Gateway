@@ -431,11 +431,26 @@ def test_login_as_runs_sudo_iu_for_selected_user(monkeypatch):
 
 
 def test_login_as_cancel_does_not_launch(monkeypatch):
+    """Picking Back in the real select_menu yields target=None; the menu
+    must return without ever launching sudo."""
     ran = {"n": 0}
     monkeypatch.setattr(admin, "list_gpuusers", lambda: ["sanuth"])
     monkeypatch.setattr(admin.getpass, "getuser", lambda: "dahamadmin")
-    monkeypatch.setattr("questionary.select",
-                        lambda *a, **k: MagicMock(ask=lambda: "[cancel]"))
+    monkeypatch.setattr("iitgpu.ui.select_menu", lambda *a, **k: None)
+    monkeypatch.setattr(admin.subprocess, "run",
+                        lambda *a, **k: ran.__setitem__("n", ran["n"] + 1))
+    admin._login_as_menu(style=None)
+    assert ran["n"] == 0
+
+
+def test_login_as_invalid_username_does_not_launch(monkeypatch):
+    """Defense in depth: even if select_menu ever returned something that
+    fails valid_username, _login_as_menu must bail out before launching
+    sudo rather than passing it through."""
+    ran = {"n": 0}
+    monkeypatch.setattr(admin, "list_gpuusers", lambda: ["sanuth"])
+    monkeypatch.setattr(admin.getpass, "getuser", lambda: "dahamadmin")
+    monkeypatch.setattr("iitgpu.ui.select_menu", lambda *a, **k: "[cancel]")
     monkeypatch.setattr(admin.subprocess, "run",
                         lambda *a, **k: ran.__setitem__("n", ran["n"] + 1))
     admin._login_as_menu(style=None)
