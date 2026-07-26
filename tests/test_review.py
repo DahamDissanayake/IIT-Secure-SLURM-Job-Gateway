@@ -406,7 +406,7 @@ def test_hub_keeps_every_row_for_a_batch_job(monkeypatch):
     ls.script = "/shared/users/u/train.py"
     assert R.run_hub(ls, None, "u", browse_script=lambda: None,
                      browse_data=lambda: None) is None
-    assert seen["choices"] == [c for c in R._HUB_CHOICES if c != "Cancel"] + [BACK]
+    assert seen["choices"] == R._HUB_CHOICES + [BACK]
 
 
 def test_advanced_hides_array_and_dependency_for_a_session(monkeypatch):

@@ -7,7 +7,6 @@ import os
 import shutil as _shutil
 from pathlib import Path
 
-import questionary
 from rich.panel import Panel
 from rich.table import Table
 

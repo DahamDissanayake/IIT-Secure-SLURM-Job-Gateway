@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 from iitgpu import auditclient
-from iitgpu.ui import header, info
+from iitgpu.ui import info, screen
 from iitgpu.validate import in_jail
 
 ALLOWED_COMMANDS = {"sbatch", "squeue", "scancel", "sinfo", "tail"}
@@ -69,7 +69,7 @@ def _dispatch(cmd: str, args: list[str]) -> None:
 
 def run_shell() -> None:
     """Run the restricted SLURM command shell."""
-    header("SLURM Shell  (advanced)")
+    screen("SLURM Shell  (advanced)")
     info(f"Allowed commands: {', '.join(sorted(ALLOWED_COMMANDS))}")
     info('Type "exit" to return to main menu.')
     print()

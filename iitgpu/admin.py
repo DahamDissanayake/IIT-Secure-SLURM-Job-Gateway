@@ -394,7 +394,7 @@ def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
 def _qos_menu(style) -> None:
     import questionary
     from rich.table import Table
-    from iitgpu.ui import BACK, console, info, ok, err, screen, select_menu, warn
+    from iitgpu.ui import console, info, ok, err, screen, select_menu, warn
 
     while True:
         rows = list_qos()

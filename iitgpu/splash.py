@@ -123,9 +123,6 @@ def resource_status_line(stats) -> str:
     return f"{counts}  [dim]·[/]  {verdict}"
 
 
-_resource_seg = resource_status_line  # back-compat alias, splash.py internal use only
-
-
 def _build_status_line(jobs, stats, username: str, spin: str) -> Panel:
     """Single-line status panel: user · all running jobs (any user) · free resources + submit verdict."""
     user_seg = f"[bold cyan]User:[/] [bold white]{username}[/]"

@@ -5,20 +5,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 import questionary
-from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import Config, make_shared_writable, templates_dir
 from iitgpu.jobs import JobSpec
-from iitgpu.ui import err, header, info, ok, warn
+from iitgpu.ui import STYLE, err, header, info, ok, warn
 
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-])
+_STYLE = STYLE
 
 # Built-in presets — never written to disk, read-only.
 _BUILTIN_PRESETS: dict[str, dict] = {

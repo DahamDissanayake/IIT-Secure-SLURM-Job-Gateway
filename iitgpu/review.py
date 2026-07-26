@@ -307,7 +307,7 @@ def _edit_advanced(ls: LaunchSpec, preview=None) -> None:
 
 _HUB_CHOICES = ["Launch", "Change script", "Change size", "Change time limit",
                 "Change environment", "Change data / model", "Change args",
-                "Advanced…", "Save as template", "Cancel"]
+                "Advanced…", "Save as template"]
 
 
 def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
@@ -335,7 +335,7 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
             # before the first cell runs is real — render_notebook_sbatch()
             # consumes it — so it gets its own row.
             choices.insert(choices.index("Change environment") + 1, _PKG_CHOICE)
-        sel = select_menu("Select:", [c for c in choices if c != "Cancel"])
+        sel = select_menu("Select:", choices)
         if sel is None:
             return None
         if sel == "Launch":

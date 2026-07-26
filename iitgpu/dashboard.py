@@ -691,12 +691,11 @@ def run_dashboard(job_id: str | None = None) -> None:
                     elif sel:
                         live.stop()
                         import questionary
-                        from questionary import Style
-                        _s = Style([("question", "bold"), ("answer", "fg:magenta bold")])
+                        from iitgpu.ui import STYLE
                         _owner_note = f" [{sel.user}]" if sel.user != current_user else ""
                         if questionary.confirm(
                             f"Cancel job {sel.job_id} ({sel.name}){_owner_note}?",
-                            default=False, style=_s,
+                            default=False, style=STYLE,
                         ).ask():
                             success, msg = cancel(sel.job_id)
                             (ok if success else err)(msg)

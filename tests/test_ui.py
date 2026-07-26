@@ -1,4 +1,3 @@
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -18,7 +17,6 @@ def test_back_constants_use_only_the_permitted_arrow_glyph():
 
 
 def test_screen_renders_a_panel_with_the_title(monkeypatch):
-    buf = Console(file=None, force_terminal=True, width=80)
     captured = []
     monkeypatch.setattr(ui, "console", type("C", (), {
         "print": lambda self, renderable: captured.append(renderable)
@@ -26,6 +24,7 @@ def test_screen_renders_a_panel_with_the_title(monkeypatch):
     ui.screen("My Screen")
     assert len(captured) == 1
     assert isinstance(captured[0], Panel)
+    assert "My Screen" in captured[0].title
 
 
 def test_screen_accepts_a_status_body(monkeypatch):
