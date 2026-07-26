@@ -154,12 +154,11 @@ def file_manager() -> None:
     """
     import getpass
     import questionary
-    from questionary import Style
     from iitgpu.config import load_config, user_dir, is_admin
     from iitgpu.validate import in_user_browse_jail, in_user_upload_jail
-    from iitgpu.ui import console, header, info, ok, err
+    from iitgpu.ui import STYLE, console, info, ok, err, screen, select_menu
 
-    style = Style([("qmark", "fg:cyan bold"), ("pointer", "fg:cyan bold")])
+    style = STYLE
     cfg = load_config()
     user = getpass.getuser()
     admin = is_admin(cfg)
@@ -181,9 +180,8 @@ def file_manager() -> None:
             cur = start
         writable_cur = _in_mut(cur)
         total, used, free = disk_usage(cur)
-        header(f"Files — {cur}")
-        if total:
-            info(f"Disk: {fmt_size(free)} free of {fmt_size(total)}")
+        _status = f"Disk: {fmt_size(free)} free of {fmt_size(total)}" if total else None
+        screen(f"Files — {cur}", status=_status)
         if not writable_cur:
             info("[dim]Read-only area — browsing only[/]")
         entries = list_dir(cur)
@@ -191,9 +189,9 @@ def file_manager() -> None:
         rows = ["[.. up]"] + [
             (f"[dir] {e.name}" if e.is_dir else f"      {e.name}  ({fmt_size(e.size)})")
             for e in entries
-        ] + extra_rows + ["[ refresh ]", "[ back ]"]
-        choice = questionary.select(f"{cur}", choices=rows, style=style).ask()
-        if choice is None or choice == "[ back ]":
+        ] + extra_rows + ["[ refresh ]"]
+        choice = select_menu(f"{cur}", rows)
+        if choice is None:
             return
         if choice == "[ refresh ]":
             continue
