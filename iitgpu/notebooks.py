@@ -37,12 +37,11 @@ def running_services() -> list[Service]:
 
 def services_menu() -> None:
     import questionary
-    from questionary import Style
-    from iitgpu.ui import header, info, ok, err, console
+    from iitgpu.ui import STYLE, info, ok, err, console, screen, select_menu
 
-    style = Style([("qmark", "fg:cyan bold"), ("pointer", "fg:cyan bold")])
+    style = STYLE
     while True:
-        header("My Running Services")
+        screen("My Running Services")
         svcs = running_services()
         if not svcs:
             info("No active notebooks / TensorBoard / interactive sessions.")
@@ -50,9 +49,9 @@ def services_menu() -> None:
         for s in svcs:
             console.print(f"  [magenta]{s.job_id}[/]  {s.name}  [{s.state}]")
             console.print(f"      [dim]{s.tunnel}[/]")
-        choices = [f"Stop {s.job_id} ({s.name})" for s in svcs] + ["Refresh", "Back"]
-        choice = questionary.select("Action:", choices=choices, style=style).ask()
-        if choice is None or choice == "Back":
+        choices = [f"Stop {s.job_id} ({s.name})" for s in svcs] + ["Refresh"]
+        choice = select_menu("Action:", choices)
+        if choice is None:
             return
         if choice == "Refresh":
             continue
@@ -67,17 +66,16 @@ def launch_tensorboard() -> None:
     import getpass
     from pathlib import Path
     import questionary
-    from questionary import Style
     from iitgpu.config import jobs_dir
     from iitgpu.jobs import JobSpec, make_job_folder, render_tensorboard_sbatch, resource_defaults
     from iitgpu.slurm import submit_job
-    from iitgpu.ui import header, info, ok, err, kv, panel
+    from iitgpu.ui import STYLE, info, ok, err, kv, panel, screen
     from iitgpu.validate import in_jail
     from iitgpu import auditclient
 
-    style = Style([("qmark", "fg:cyan bold"), ("pointer", "fg:cyan bold")])
+    style = STYLE
     cfg = load_config()
-    header("Launch TensorBoard")
+    screen("Launch TensorBoard")
     logdir = questionary.text("Log directory to visualise:",
                               default=str(Path(cfg.nfs_root) / getpass.getuser()),
                               style=style).ask()
