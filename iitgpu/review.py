@@ -11,7 +11,7 @@ from iitgpu.jobs import SHARDS_PER_GPU, gpu_share_note
 from iitgpu.launchspec import (SIZES, LaunchSpec, apply_size, availability_line,
                                size_availability, size_label)
 from iitgpu.slurm import get_node_stats
-from iitgpu.ui import console, info, warn
+from iitgpu.ui import console, info, select_menu, warn
 
 _STYLE = None  # set by wizard at import-time hookup if desired; questionary default otherwise
 
@@ -215,7 +215,7 @@ def _edit_data_model(ls: LaunchSpec, cfg, browse_data, deps_prompt) -> None:
     ]
     if _wants_deps(ls) and deps_prompt is not None:
         opts.append("python packages to pre-install")
-    sel = questionary.select("Data / model:", choices=opts + ["back"]).ask()
+    sel = select_menu("Data / model:", opts)
     if sel == "data folder (browse)":
         picked = browse_data()
         if picked:
@@ -275,9 +275,9 @@ def _edit_advanced(ls: LaunchSpec, preview=None) -> None:
             opts += [f"job array [{ls.array or 'off'}]",
                      f"run after job [{ls.dependency or 'off'}]"]
         opts += [f"email notifications [{'on' if ls.mail else 'off'}]",
-                 "view generated sbatch", "back"]
-        sel = questionary.select("Advanced:", choices=opts).ask()
-        if sel is None or sel == "back":
+                 "view generated sbatch"]
+        sel = select_menu("Advanced:", opts)
+        if sel is None:
             return
         if sel.startswith("job array"):
             raw = questionary.text("Array spec (e.g. 0-9 or 1-100%4, blank = off):",
@@ -337,8 +337,8 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
             # before the first cell runs is real — render_notebook_sbatch()
             # consumes it — so it gets its own row.
             choices.insert(choices.index("Change environment") + 1, _PKG_CHOICE)
-        sel = questionary.select("Select:", choices=choices).ask()
-        if sel is None or sel == "Cancel":
+        sel = select_menu("Select:", [c for c in choices if c != "Cancel"])
+        if sel is None:
             return None
         if sel == "Launch":
             if ls.intent == "batch" and not ls.script:

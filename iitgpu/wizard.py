@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 
 import questionary
-from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import load_config, jobs_dir, user_dir
@@ -20,18 +19,11 @@ from iitgpu.launchspec import (LaunchSpec, apply_size, default_spec, from_rerun,
                                from_template, recent_scripts, to_job_spec)
 from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
-from iitgpu.ui import err, header, info, kv, ok, panel, warn
+from iitgpu.ui import BACK, STYLE, err, info, kv, ok, panel, screen, select_menu, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
 
 
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-    ("selected", "fg:magenta"),
-])
+_STYLE = STYLE
 
 # The whole intake is three questions wide: what you are doing, what you are
 # running it on, and — everything else — the review hub. The old seven
@@ -705,7 +697,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             return start if _browse_jail(start) else cfg.nfs_root
         return start
 
-    header("New Job")
+    screen("New Job")
 
     # ── Intake ───────────────────────────────────────────────────────────────
     ls: LaunchSpec | None = None
@@ -757,17 +749,14 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             _apply_default_env(ls, cfg)
             break
 
-        sub = questionary.select(
+        sub = select_menu(
             "Other:",
-            choices=["Submit my own .sbatch", "Load a template", "back"],
-            style=_STYLE,
-        ).ask()
+            ["Submit my own .sbatch", "Load a template"],
+        )
         if sub == "Submit my own .sbatch":
             _run_own_sbatch(cfg, user, jdir)
             return
         if sub is None:
-            return
-        if sub == "back":
             continue                      # back to the intent list, not out
         from iitgpu.templates import pick_template
         tdata = pick_template(cfg)

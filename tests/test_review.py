@@ -7,6 +7,7 @@ from iitgpu.jobs import SHARDS_PER_GPU
 from iitgpu.launchspec import default_spec
 from iitgpu.review import render_hub, run_hub
 from iitgpu.slurm import NodeStats
+from iitgpu.ui import BACK
 
 
 def _stats(free=3):
@@ -67,7 +68,7 @@ def test_run_hub_launch_and_cancel(monkeypatch):
     assert run_hub(ls, cfg=None, user="u",
                    browse_script=lambda: None, browse_data=lambda: None) == "launch"
 
-    monkeypatch.setattr(R.questionary, "select", _Ask(["Cancel"]))
+    monkeypatch.setattr(R.questionary, "select", _Ask([BACK]))
     assert run_hub(ls, cfg=None, user="u",
                    browse_script=lambda: None, browse_data=lambda: None) is None
 
@@ -175,7 +176,7 @@ def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
 
     ls = default_spec("batch")   # script left unset
     monkeypatch.setattr(R, "get_node_stats", lambda: None)
-    monkeypatch.setattr(R.questionary, "select", _Ask(["Launch", "Cancel"]))
+    monkeypatch.setattr(R.questionary, "select", _Ask(["Launch", BACK]))
     result = run_hub(ls, cfg=None, user="u",
                      browse_script=lambda: None, browse_data=lambda: None)
     assert result is None
@@ -186,12 +187,19 @@ def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
 
 def _captured_choices(monkeypatch, question_prefix):
     """Record the choices offered for the first select whose question starts
-    with *question_prefix*, then cancel it."""
+    with *question_prefix*, then cancel it.
+
+    select_menu() appends its own Separator() + Back item to whatever choices
+    a caller passes in; the Separator is a display-only marker with no string
+    identity (not even equal to another Separator instance), so it is dropped
+    here rather than leaking into every assertion that follows.
+    """
+    from questionary import Separator
     seen = {}
 
     def _sel(question, choices=None, **kw):
         if question.startswith(question_prefix) and "choices" not in seen:
-            seen["choices"] = list(choices or [])
+            seen["choices"] = [c for c in (choices or []) if not isinstance(c, Separator)]
         return type("A", (), {"ask": lambda self: None})()
 
     monkeypatch.setattr("questionary.select", _sel)
@@ -360,7 +368,7 @@ def test_hub_hides_every_no_op_row_for_a_shell(monkeypatch):
                  "Change script", "Change args"):
         assert gone not in seen["choices"], gone
     assert seen["choices"] == ["Launch", "Change size", "Change time limit",
-                               "Save as template", "Cancel"]
+                               "Save as template", BACK]
 
     panel = _plain(render_hub(default_spec("shell"), None))
     for gone in ("Environment", "Data / model", "Advanced", "Args", "Script"):
@@ -398,7 +406,7 @@ def test_hub_keeps_every_row_for_a_batch_job(monkeypatch):
     ls.script = "/shared/users/u/train.py"
     assert R.run_hub(ls, None, "u", browse_script=lambda: None,
                      browse_data=lambda: None) is None
-    assert seen["choices"] == R._HUB_CHOICES
+    assert seen["choices"] == [c for c in R._HUB_CHOICES if c != "Cancel"] + [BACK]
 
 
 def test_advanced_hides_array_and_dependency_for_a_session(monkeypatch):
@@ -425,7 +433,7 @@ def test_view_generated_sbatch_prints_the_script(monkeypatch, capsys):
     """I4: the menu item used to print a promise and show nothing."""
     import iitgpu.review as R
 
-    answers = ["view generated sbatch", "back"]
+    answers = ["view generated sbatch", BACK]
 
     def _sel(question, choices=None, **kw):
         return type("A", (), {"ask": lambda self: answers.pop(0)})()
@@ -440,7 +448,7 @@ def test_view_generated_sbatch_prints_the_script(monkeypatch, capsys):
 def test_view_generated_sbatch_without_a_preview_says_so(monkeypatch, capsys):
     import iitgpu.review as R
 
-    answers = ["view generated sbatch", "back"]
+    answers = ["view generated sbatch", BACK]
 
     def _sel(question, choices=None, **kw):
         return type("A", (), {"ask": lambda self: answers.pop(0)})()
@@ -460,7 +468,7 @@ def test_run_hub_passes_the_preview_through_to_advanced(monkeypatch):
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
     monkeypatch.setattr(R, "_edit_advanced",
                         lambda ls, preview=None: got.setdefault("preview", preview))
-    answers = ["Advanced…", "Cancel"]
+    answers = ["Advanced…", BACK]
     monkeypatch.setattr(R.questionary, "select", lambda *a, **kw: type(
         "A", (), {"ask": lambda self: answers.pop(0)})())
 

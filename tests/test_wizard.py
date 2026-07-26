@@ -9,6 +9,7 @@ against that class of bug: a module-level import must never be shadowed by a
 function-local of the same name.
 """
 import iitgpu.wizard as wizard
+from iitgpu.ui import BACK
 
 
 # Names imported at module top in wizard.py that must stay global inside functions.
@@ -817,7 +818,7 @@ def test_other_back_returns_to_the_intent_list_not_out_of_the_wizard(monkeypatch
     def _sel(question, choices=None, **kw):
         questions.append(question)
         # 1st: intent -> Other. 2nd: Other submenu -> back. 3rd: intent -> quit.
-        answers = [wiz._OTHER_CHOICE, "back", None]
+        answers = [wiz._OTHER_CHOICE, BACK, None]
         return MagicMock(ask=lambda: answers[min(len(questions), 3) - 1])
 
     monkeypatch.setattr("questionary.select", _sel)
