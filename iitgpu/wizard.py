@@ -16,8 +16,8 @@ from iitgpu.config import load_config, jobs_dir, user_dir
 from iitgpu.jobs import (SHARDS_PER_GPU, JobSpec, build_interactive_cmd,
                          gpu_share_note, make_job_folder, pip_install_block,
                          render_notebook_sbatch, render_sbatch, resource_defaults)
-from iitgpu.launchspec import (LaunchSpec, default_spec, from_rerun, from_template,
-                               recent_scripts, to_job_spec)
+from iitgpu.launchspec import (LaunchSpec, apply_size, default_spec, from_rerun,
+                               from_template, recent_scripts, to_job_spec)
 from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
 from iitgpu.ui import err, header, info, kv, ok, panel, warn
@@ -45,6 +45,13 @@ _INTENTS: list[tuple[str, str]] = [
 ]
 
 _OTHER_CHOICE = "Other: my own .sbatch · templates"
+
+# A guided shortcut into the same batch pipeline above, not a fourth intent:
+# it sets ls.intent = "batch" like any script job, just with fine-tune-shaped
+# defaults (whole GPU, the llm-finetune env) and two extra up-front questions
+# (base model, dataset) that a plain batch job leaves to the hub.
+_FINETUNE_CHOICE = "Fine-tune a model          — guided: script, base model, dataset"
+_FINETUNE_ENV_NAME = "llm-finetune"
 
 # What the batch intake will accept, typed or browsed.
 _BATCH_EXTS = (".py", ".sh", ".ipynb")
@@ -501,7 +508,7 @@ def _build_run_command(ls: LaunchSpec) -> str:
 _DEFAULT_ENV_NAME = "data-science"
 
 
-def _apply_default_env(ls: LaunchSpec, cfg) -> None:
+def _apply_default_env(ls: LaunchSpec, cfg, prefer: str | None = None) -> None:
     """Default a fresh launch to the shared prebuilt env when one is installed.
 
     `default_spec` leaves conda_env empty, which the hub renders as "(not set)"
@@ -509,18 +516,64 @@ def _apply_default_env(ls: LaunchSpec, cfg) -> None:
     default got a JupyterLab session with no torch in it. The filesystem probe
     lives here rather than in launchspec.default_spec so that module stays pure.
     Absent env = no change: the empty default is still a valid launch.
+
+    *prefer*, when given, is tried before the shared default — the fine-tune
+    flow prefers llm-finetune over data-science when both are installed.
     """
     if ls.intent not in ("notebook", "batch"):
         return                      # a shell renders no sbatch — see review.py
     if ls.conda_env or ls.venv_path or ls.container_image:
         return                      # a template/rerun already said what to use
-    env = Path(getattr(cfg, "nfs_root", "/shared")) / "envs" / _DEFAULT_ENV_NAME
-    try:
-        present = env.is_dir()
-    except OSError:
-        present = False
-    if present:
-        ls.env_kind, ls.conda_env = "prebuilt", str(env)
+    base = Path(getattr(cfg, "nfs_root", "/shared")) / "envs"
+    for name in ([prefer] if prefer else []) + [_DEFAULT_ENV_NAME]:
+        env = base / name
+        try:
+            present = env.is_dir()
+        except OSError:
+            present = False
+        if present:
+            ls.env_kind, ls.conda_env = "prebuilt", str(env)
+            return
+
+
+def _pick_finetune_model(cfg) -> str:
+    """The one question generic batch intake does not ask: which base model?
+
+    Same three sources the hub's Data / model editor offers (registry / HF
+    download / manual path), asked up front so a fine-tune launch does not
+    start with no model selected at all. Local paths still face the jail —
+    the trust boundary here matches _edit_data_model's exactly.
+    """
+    choice = questionary.select(
+        "Base model:",
+        choices=["Pick from registry", "Download from HuggingFace",
+                 "Enter a path or HF repo id", "Skip for now"],
+        style=_STYLE,
+    ).ask()
+    if choice is None or choice == "Skip for now":
+        return ""
+    if choice == "Pick from registry":
+        from iitgpu.models import pick_model
+        picked = pick_model(cfg)
+        return picked.path if picked is not None else ""
+    if choice == "Download from HuggingFace":
+        repo_id = (questionary.text(
+            "HuggingFace repo ID (e.g. mistralai/Mistral-7B-v0.1):", style=_STYLE
+        ).ask() or "").strip()
+        if not repo_id:
+            return ""
+        from iitgpu.models import download_hf
+        ok_download, dest = download_hf(cfg, repo_id)
+        return dest if ok_download and dest else ""
+    raw = (questionary.text("Model path (or HF repo id):", style=_STYLE).ask() or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("/"):
+        from iitgpu.validate import in_jail
+        if not in_jail(raw):
+            warn("Path is outside the allowed jail — skipping model selection.")
+            return ""
+    return raw
 
 
 def _preview_sbatch(ls: LaunchSpec, cfg, user: str) -> str:
@@ -670,14 +723,31 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             ls.script = ""
 
     while ls is None:
+        _intent_choices = [label for _, label in _INTENTS]
+        _intent_choices.insert(2, _FINETUNE_CHOICE)  # after batch, before shell
         choice = questionary.select(
             "What do you want to do?",
-            choices=[label for _, label in _INTENTS]
-                    + [questionary.Separator(), _OTHER_CHOICE],
+            choices=_intent_choices + [questionary.Separator(), _OTHER_CHOICE],
             style=_STYLE,
         ).ask()
         if choice is None:
             return
+
+        if choice == _FINETUNE_CHOICE:
+            ls = default_spec("batch")
+            apply_size(ls, "whole")
+            _apply_default_env(ls, cfg, prefer=_FINETUNE_ENV_NAME)
+            picked = _pick_batch_script(jdir, user, _browse_jail, _user_browse_start())
+            if not picked:
+                return
+            ls.script = picked
+            model_path = _pick_finetune_model(cfg)
+            if model_path:
+                ls.model_path = model_path
+            data_path = _browse_data_folder(_user_browse_start(), _browse_jail)
+            if data_path:
+                ls.data_path = data_path
+            break
 
         if choice != _OTHER_CHOICE:
             intent = next((k for k, label in _INTENTS if label == choice), None)

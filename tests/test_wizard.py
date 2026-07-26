@@ -1022,3 +1022,101 @@ def test_notebook_submit_success_reaches_dashboard_with_no_confirm_between():
     j = src.index("run_dashboard(job_id=result)", i)
     between = src[i:j]
     assert "questionary.confirm" not in between
+
+
+def test_finetune_choice_offered_between_batch_and_shell():
+    """A guided shortcut, not a fourth intent — the menu shows it, but it must
+    not be a new value ls.intent can take (that would need every ls.intent ==
+    "batch" check in this file updated, and none of them were)."""
+    import inspect
+    src = inspect.getsource(wizard.run_wizard)
+    assert "_FINETUNE_CHOICE" in src
+    assert '"finetune"' not in src
+
+
+def test_finetune_env_prefers_llm_finetune_over_data_science(tmp_path):
+    (tmp_path / "envs" / "data-science").mkdir(parents=True)
+    (tmp_path / "envs" / "llm-finetune").mkdir(parents=True)
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    wizard._apply_default_env(ls, _Cfg(tmp_path), prefer="llm-finetune")
+    assert ls.conda_env == str(tmp_path / "envs" / "llm-finetune")
+
+
+def test_finetune_env_falls_back_when_the_preferred_env_is_missing(tmp_path):
+    """Only data-science installed — prefer= must not leave conda_env empty."""
+    (tmp_path / "envs" / "data-science").mkdir(parents=True)
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    wizard._apply_default_env(ls, _Cfg(tmp_path), prefer="llm-finetune")
+    assert ls.conda_env == str(tmp_path / "envs" / "data-science")
+
+
+def test_default_env_without_prefer_is_unchanged(tmp_path):
+    """prefer=None (every existing call site) must behave exactly as before."""
+    (tmp_path / "envs" / "data-science").mkdir(parents=True)
+    from iitgpu.launchspec import default_spec
+
+    ls = default_spec("batch")
+    wizard._apply_default_env(ls, _Cfg(tmp_path))
+    assert ls.conda_env == str(tmp_path / "envs" / "data-science")
+
+
+def test_pick_finetune_model_registry(monkeypatch):
+    from iitgpu.models import ModelEntry
+
+    entry = ModelEntry(name="mistral", source="huggingface",
+                       path="/shared/models/mistral", added_at="2026-01-01",
+                       added_by="u", size_mb=1.0)
+    monkeypatch.setattr("questionary.select", _select_returning("Pick from registry"))
+    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: entry)
+    assert wizard._pick_finetune_model(object()) == "/shared/models/mistral"
+
+
+def test_pick_finetune_model_registry_cancelled_returns_empty(monkeypatch):
+    monkeypatch.setattr("questionary.select", _select_returning("Pick from registry"))
+    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: None)
+    assert wizard._pick_finetune_model(object()) == ""
+
+
+def test_pick_finetune_model_huggingface_download(monkeypatch):
+    def _text(question, **kw):
+        return type("A", (), {"ask": lambda self: "mistralai/Mistral-7B-v0.1"})()
+
+    monkeypatch.setattr("questionary.select", _select_returning("Download from HuggingFace"))
+    monkeypatch.setattr("questionary.text", _text)
+    monkeypatch.setattr("iitgpu.models.download_hf",
+                        lambda cfg, repo_id: (True, "/shared/models/Mistral-7B-v0.1"))
+    assert wizard._pick_finetune_model(object()) == "/shared/models/Mistral-7B-v0.1"
+
+
+def test_pick_finetune_model_path_rejects_outside_jail(monkeypatch, capsys):
+    def _text(question, **kw):
+        return type("A", (), {"ask": lambda self: "/etc/passwd"})()
+
+    monkeypatch.setattr("questionary.select", _select_returning("Enter a path or HF repo id"))
+    monkeypatch.setattr("questionary.text", _text)
+    assert wizard._pick_finetune_model(object()) == ""
+    assert "outside the allowed jail" in capsys.readouterr().out
+
+
+def test_pick_finetune_model_skip_returns_empty(monkeypatch):
+    monkeypatch.setattr("questionary.select", _select_returning("Skip for now"))
+    assert wizard._pick_finetune_model(object()) == ""
+
+
+def test_finetune_branch_sets_whole_gpu_and_prefers_its_env():
+    """Structural: the finetune branch must call apply_size(ls, "whole") and
+    thread prefer=_FINETUNE_ENV_NAME into _apply_default_env — the two things
+    that make it launch differently from a plain batch job."""
+    import inspect
+    src = inspect.getsource(wizard.run_wizard)
+    i = src.index("_FINETUNE_CHOICE:")
+    j = src.index("break", i)
+    branch = src[i:j]
+    assert 'apply_size(ls, "whole")' in branch
+    assert "prefer=_FINETUNE_ENV_NAME" in branch
+    assert "_pick_batch_script(" in branch
+    assert "_pick_finetune_model(cfg)" in branch
