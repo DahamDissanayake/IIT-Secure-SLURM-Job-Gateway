@@ -583,9 +583,9 @@ def _provision_menu(style) -> None:
 
 def _view_audit_log(style) -> None:
     import questionary
-    from iitgpu.ui import console, header, info
+    from iitgpu.ui import console, screen, info
 
-    header("Audit Log")
+    screen("Audit Log")
     uf  = questionary.text("Filter by user (blank=all):", style=style).ask() or ""
     af  = questionary.text("Filter by action (blank=all):", style=style).ask() or ""
     df  = questionary.text("Date from (YYYY-MM-DD, blank=any):", style=style).ask() or ""
@@ -664,9 +664,9 @@ def _view_users(style) -> None:
 
 def _view_maillog(style) -> None:
     import questionary
-    from iitgpu.ui import console, header, info
+    from iitgpu.ui import console, screen, info
 
-    header("Mail Delivery Log  (/var/log/msmtp.log)")
+    screen("Mail Delivery Log  (/var/log/msmtp.log)")
     lines = daemonclient.tail_maillog(lines=60)
     if not lines:
         info("Log empty or unavailable (check daemon + /var/log/msmtp.log).")
@@ -678,9 +678,9 @@ def _view_maillog(style) -> None:
 
 def _view_job_output(style) -> None:
     import questionary
-    from iitgpu.ui import console, header, info, err
+    from iitgpu.ui import console, info, err, screen, select_menu
 
-    header("User Job Output")
+    screen("User Job Output")
     target_user = questionary.text("Username:", style=style).ask()
     if not target_user or not target_user.strip():
         return
@@ -699,9 +699,8 @@ def _view_job_output(style) -> None:
     if not files:
         info(f"No .out/.err files for {target_user}")
         return
-    fname = questionary.select("Select file:", choices=files + ["Back"],
-                               style=style).ask()
-    if fname is None or fname == "Back":
+    fname = select_menu("Select file:", files)
+    if fname is None:
         return
     # Find the full relative path
     rel = None
@@ -716,20 +715,19 @@ def _view_job_output(style) -> None:
     if not good:
         err(f"Cannot read: {content}")
         return
-    header(f"Job output: {target_user}/{rel}")
+    screen(f"Job output: {target_user}/{rel}")
     console.print(content[:8000])   # first 8k chars
     questionary.press_any_key_to_continue("").ask()
 
 
 def _view_service_health(style) -> None:
     import questionary
-    from iitgpu.ui import console, header, info
+    from iitgpu.ui import console, info, screen, select_menu
 
     _UNITS = ["iit-gpu-audit", "slurmctld", "slurmd", "mariadb", "slurmdbd"]
-    header("Service Health")
-    unit = questionary.select("Select service:", choices=_UNITS + ["Back"],
-                              style=style).ask()
-    if unit is None or unit == "Back":
+    screen("Service Health")
+    unit = select_menu("Select service:", _UNITS)
+    if unit is None:
         return
     good, data = daemonclient.service_status(unit)
     if not good:
@@ -776,9 +774,9 @@ def disk_usage_by_user(jobs_root: str) -> list[dict]:
 def _view_disk_usage(style) -> None:
     import questionary
     from rich.table import Table
-    from iitgpu.ui import console, header, info
+    from iitgpu.ui import console, screen, info
 
-    header("Disk Usage by User  (/shared/jobs)")
+    screen("Disk Usage by User  (/shared/jobs)")
     cfg   = load_config()
     root  = Path(cfg.nfs_root) / cfg.jobs_subdir
     rows  = disk_usage_by_user(str(root))
@@ -800,15 +798,13 @@ def _view_disk_usage(style) -> None:
 def _maintenance_menu(style) -> None:
     import os
     import questionary
-    from iitgpu.ui import info, ok, err
+    from iitgpu.ui import info, ok, err, screen, select_menu
+    screen("Maintenance Notice")
     current = get_maintenance()
     if current:
         info(f"  [yellow]Active notice:[/] {current.get('reason', '')}")
-        action = questionary.select(
-            "Maintenance notice:",
-            choices=["Update notice", "Clear notice", "Back"],
-            style=style,
-        ).ask()
+        action = select_menu(
+            "Maintenance notice:", ["Update notice", "Clear notice"])
         if action == "Clear notice":
             if questionary.confirm("Clear the maintenance notice?",
                                    default=True, style=style).ask():
@@ -833,8 +829,8 @@ def _maintenance_menu(style) -> None:
 
 def _mail_service_menu(style) -> None:
     import questionary
-    from iitgpu.ui import header, info, ok, err, warn
-    header("Mail Service")
+    from iitgpu.ui import screen, info, ok, err, warn
+    screen("Mail Service")
     disabled = is_mail_disabled()
     if disabled:
         info("  [yellow]Current state: DISABLED[/] — no emails are being sent.")
@@ -862,19 +858,18 @@ def _login_as_menu(style) -> None:
     session are audited as the TARGET user (kernel SO_PEERCRED), so the switch
     itself is logged here for accountability."""
     import questionary
-    from iitgpu.ui import header, info, ok, err, warn
-    header("Log in as user")
+    from iitgpu.ui import info, ok, err, screen, select_menu, warn
+    screen("Log in as user")
     me = getpass.getuser()
     targets = [u for u in list_gpuusers() if u != me]
     if not targets:
         warn("No other users found to log in as.")
         questionary.press_any_key_to_continue("").ask()
         return
-    target = questionary.select(
+    target = select_menu(
         "Log in as which user?  (you'll get THEIR TUI; quit it to return here)",
-        choices=targets + ["[cancel]"], style=style,
-    ).ask()
-    if not target or target == "[cancel]":
+        targets)
+    if not target:
         return
     if not valid_username(target):
         err(f"invalid username {target!r}")
