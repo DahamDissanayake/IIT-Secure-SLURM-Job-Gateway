@@ -7,6 +7,7 @@ import questionary
 from rich.table import Table
 
 from iitgpu import auditclient
+from iitgpu.config import is_admin, load_config
 from iitgpu.slurm import (cancel, hold, release, requeue, queue,
                           job_detail, job_efficiency, filtered_history)
 from iitgpu.ui import (BACK_TO_MAIN, STYLE, console, err, info, kv, ok,
@@ -41,16 +42,33 @@ def cancel_job() -> None:
 
 
 def manage_job() -> None:
+    """Admins (gpuadmins) see and manage every user's jobs here, matching
+    the live dashboard's admin-cancel behaviour; everyone else is scoped to
+    their own jobs only, as before."""
     screen("Manage Job")
-    entries = queue(user=getpass.getuser())
+    current_user = getpass.getuser()
+    admin = is_admin(load_config())
+    entries = queue(all_users=True) if admin else queue(user=current_user)
     if not entries:
         info("No active jobs.")
         return
-    choices = [f"{e.job_id}  {e.name}  [{e.state}]" for e in entries]
+    choices = [
+        f"{e.job_id}  {e.name}  [{e.state}]" + (f"  ({e.user})" if admin else "")
+        for e in entries
+    ]
     choice = select_menu("Select a job:", choices)
     if choice is None:
         return
     job_id = choice.split()[0]
+    sel = next((e for e in entries if e.job_id == job_id), None)
+    is_own = sel is not None and sel.user == current_user
+
+    # Defense in depth: non-admins only ever see their own jobs above, but
+    # guard the mutating actions on ownership regardless.
+    if not is_own and not admin:
+        err(f"Job {job_id} belongs to {sel.user if sel else 'another user'} "
+            "— you can only manage your own jobs.")
+        return
 
     action = select_menu(
         f"Action for job {job_id}:",
@@ -75,11 +93,13 @@ def manage_job() -> None:
         "Requeue": (requeue, "job_requeue"),
     }
     fn, audit_action = _ACTIONS[action]
+    _owner_note = f" [{sel.user}]" if (sel and not is_own) else ""
     if action in ("Cancel", "Requeue") and not questionary.confirm(
-        f"{action} job {job_id}?", default=False, style=_STYLE
+        f"{action} job {job_id}{_owner_note}?", default=False, style=_STYLE
     ).ask():
         return
-    auditclient.log(audit_action, detail="user_requested", job_id=job_id)
+    _detail = "user_requested_admin" if not is_own else "user_requested"
+    auditclient.log(audit_action, detail=_detail, job_id=job_id)
     success, msg = fn(job_id)
     (ok if success else err)(msg)
 
