@@ -81,7 +81,7 @@ def show_splash(pause: float = 1.5) -> None:
         time.sleep(pause)
 
 
-def _resource_seg(stats) -> str:
+def resource_status_line(stats) -> str:
     """Free GPU/CPU/RAM + a plain-language verdict on whether another job can start now.
 
     The cluster schedules per-resource (select/cons_tres), not per-node, so
@@ -123,6 +123,9 @@ def _resource_seg(stats) -> str:
     return f"{counts}  [dim]·[/]  {verdict}"
 
 
+_resource_seg = resource_status_line  # back-compat alias, splash.py internal use only
+
+
 def _build_status_line(jobs, stats, username: str, spin: str) -> Panel:
     """Single-line status panel: user · all running jobs (any user) · free resources + submit verdict."""
     user_seg = f"[bold cyan]User:[/] [bold white]{username}[/]"
@@ -142,7 +145,7 @@ def _build_status_line(jobs, stats, username: str, spin: str) -> Panel:
         else:
             job_seg = "[dim]no jobs running[/]"
 
-    res_seg = _resource_seg(stats)
+    res_seg = resource_status_line(stats)
 
     line = f"  {user_seg}  [dim]·[/]  {job_seg}  [dim]·[/]  {res_seg}"
     return Panel(

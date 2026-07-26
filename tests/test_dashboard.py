@@ -1,5 +1,6 @@
 # tests/test_dashboard.py
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 
 
@@ -603,6 +604,18 @@ def test_build_status_line_shows_current_user():
     rendered = cap.get()
 
     assert "myuser" in rendered
+
+
+def test_resource_status_line_is_the_public_name_for_the_verdict():
+    from iitgpu.splash import resource_status_line
+
+    stats = SimpleNamespace(
+        cpu_total=32, cpu_alloc=8, mem_total_mb=61440, mem_alloc_mb=8192,
+        shard_total=4, shard_alloc=2, gpu_total=1, gpu_alloc=0,
+    )
+    line = resource_status_line(stats)
+    assert "GPU" in line
+    assert "slices free" in line
 
 
 # ── CANCELLED state display ───────────────────────────────────────────────────
