@@ -100,20 +100,16 @@ def sreport_cluster_usage(days: int = 30) -> str:
 
 def usage_menu() -> None:
     import questionary
-    from questionary import Style
     from rich.table import Table
-    from iitgpu.ui import console, header, info
+    from iitgpu.ui import console, info, screen, select_menu
 
-    style = Style([("qmark", "fg:cyan bold"), ("pointer", "fg:cyan bold")])
     while True:
-        header("Usage & Accounting")
-        choice = questionary.select(
+        screen("Usage & Accounting")
+        choice = select_menu(
             "Report:",
-            choices=["GPU/CPU hours per user (30d)", "Fairshare standing",
-                     "Raw sreport (30d)", "Back"],
-            style=style,
-        ).ask()
-        if choice is None or choice == "Back":
+            ["GPU/CPU hours per user (30d)", "Fairshare standing",
+             "Raw sreport (30d)"])
+        if choice is None:
             return
         if choice.startswith("GPU/CPU"):
             rows = usage_by_user(days=30)
