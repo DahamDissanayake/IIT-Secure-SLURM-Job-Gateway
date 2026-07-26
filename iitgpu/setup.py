@@ -12,21 +12,15 @@ import tempfile
 from pathlib import Path
 
 import questionary
-from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import Config, conda_sh, jobs_dir, load_config
 from iitgpu import slurm as _slurm
 from iitgpu.slurm import submit_job
-from iitgpu.ui import err, header, info, kv, ok, warn
+from iitgpu.ui import BACK_TO_MAIN, STYLE, err, info, kv, ok, screen, select_menu, warn
 from iitgpu.validate import in_jail, safe_listdir
 
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-])
+_STYLE = STYLE
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -46,7 +40,7 @@ def check_cluster_health(cfg: Config) -> tuple[bool, list[str]]:
 
 
 def _run_health_check(cfg: Config) -> bool:
-    header("Cluster Health Check")
+    screen("Cluster Health Check")
     ok_flag, errors = check_cluster_health(cfg)
     if ok_flag:
         ok("Cluster is reachable and shared storage is writable.")
@@ -60,7 +54,7 @@ def _run_health_check(cfg: Config) -> bool:
 # ── Environment setup ─────────────────────────────────────────────────────────
 
 def _run_env_setup(cfg: Config) -> None:
-    header("Environment Setup")
+    screen("Environment Setup")
     from iitgpu.envbuilder import FRAMEWORK_LABELS, build_env
 
     framework_choices = list(FRAMEWORK_LABELS.values()) + ["[skip]"]
@@ -106,7 +100,7 @@ def _run_env_setup(cfg: Config) -> None:
 # ── Data upload ───────────────────────────────────────────────────────────────
 
 def _run_data_upload(cfg: Config) -> None:
-    header("Data Upload")
+    screen("Data Upload")
     user = getpass.getuser()
     dest_dir = Path(user_dir(cfg, user)) / "data"
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -168,7 +162,7 @@ def _build_smoke_test_script(env_path: str, cfg: Config, out_dir: str) -> str:
 
 
 def _run_smoke_test(cfg: Config) -> None:
-    header("Smoke Test")
+    screen("Smoke Test")
     from iitgpu.envs import list_all_envs
     envs = list_all_envs(cfg)
     if not envs:
@@ -263,7 +257,7 @@ def _browse_file(start_dir: str) -> str | None:
 # ── Model download ────────────────────────────────────────────────────────────
 
 def _run_model_download(cfg: Config) -> None:
-    header("Model Download")
+    screen("Model Download")
     from iitgpu.models import model_menu
     model_menu(cfg)
 
@@ -358,7 +352,7 @@ def _verify_spec_packages(env_path: str, pip_deps: list[str]) -> list[str]:
 
 
 def _run_install_prebuilt(cfg: Config) -> None:
-    header("Install Prebuilt Environment")
+    screen("Install Prebuilt Environment")
     specs_dir = _PREBUILT_SPECS_DIR
     if not specs_dir.exists():
         warn(f"Specs directory not found: {specs_dir}")
@@ -374,11 +368,9 @@ def _run_install_prebuilt(cfg: Config) -> None:
         warn("No prebuilt specs found in envs/specs/")
         return
 
-    choices = [f"{name}  — {desc}" for name, desc in available.items()] + ["[back]"]
-    choice = questionary.select(
-        "Which prebuilt environment?", choices=choices, style=_STYLE
-    ).ask()
-    if choice is None or choice == "[back]":
+    choices = [f"{name}  — {desc}" for name, desc in available.items()]
+    choice = select_menu("Which prebuilt environment?", choices)
+    if choice is None:
         return
 
     name = choice.split("  —")[0].strip()
@@ -480,7 +472,6 @@ def _run_env_manager(cfg: Config) -> None:
 
 def run_setup() -> None:
     cfg = load_config()
-    header("Setup")
 
     if not _run_health_check(cfg):
         return
@@ -495,14 +486,13 @@ def run_setup() -> None:
     ]
 
     by_label = dict(steps)
-    # Single arrow-key menu: show every setup action at once instead of asking a
-    # yes/no for each. Loop so several actions can run in one visit; Enter selects.
     while True:
-        choice = questionary.select(
+        screen("Setup")
+        choice = select_menu(
             "What would you like to set up?",
-            choices=[label for label, _ in steps] + ["Back to main menu"],
-            style=_STYLE,
-        ).ask()
-        if choice is None or choice == "Back to main menu":
+            [label for label, _ in steps],
+            back=BACK_TO_MAIN,
+        )
+        if choice is None:
             return
         by_label[choice](cfg)

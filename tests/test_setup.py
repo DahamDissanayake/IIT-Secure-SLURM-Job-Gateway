@@ -4,6 +4,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
+from iitgpu.ui import BACK_TO_MAIN
+
 
 def test_health_check_passes_when_shared_writable_and_sinfo_ok(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
@@ -183,13 +185,13 @@ def test_install_prebuilt_refuses_to_register_incomplete_env(tmp_path, monkeypat
 
 def test_run_setup_uses_arrow_select_menu_not_confirm_chain(monkeypatch):
     """Setup shows one arrow-key select menu (all actions at once), dispatches
-    the chosen action, loops, and exits on 'Back to main menu' — it must NOT
+    the chosen action, loops, and exits on the back option — it must NOT
     ask a yes/no confirm per step.
     """
     from iitgpu import setup as s
 
     calls = []
-    select_returns = iter(["Model download", "Smoke test", "Back to main menu"])
+    select_returns = iter(["Model download", "Smoke test", BACK_TO_MAIN])
     sel = MagicMock()
     sel.ask.side_effect = lambda: next(select_returns)
     confirm_mock = MagicMock()
@@ -215,13 +217,13 @@ def test_run_setup_uses_arrow_select_menu_not_confirm_chain(monkeypatch):
                   "Manage environments & containers", "Data upload",
                   "Model download", "Smoke test"):
         assert label in choices
-    assert "Back to main menu" in choices
+    assert BACK_TO_MAIN in choices
 
 
 def test_run_setup_back_exits_without_running_steps(monkeypatch):
     from iitgpu import setup as s
     sel = MagicMock()
-    sel.ask.return_value = "Back to main menu"
+    sel.ask.return_value = BACK_TO_MAIN
     ran = []
     with patch("iitgpu.setup.load_config", return_value=MagicMock()), \
          patch("iitgpu.setup._run_health_check", return_value=True), \
