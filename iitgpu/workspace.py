@@ -8,20 +8,11 @@ import shutil as _shutil
 from pathlib import Path
 
 import questionary
-from questionary import Style
 from rich.panel import Panel
 from rich.table import Table
 
 from iitgpu.config import load_config, jobs_dir, models_dir
-from iitgpu.ui import console, header, info, warn
-
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-])
+from iitgpu.ui import BACK_TO_MAIN, console, info, screen, select_menu, warn
 
 
 def _fmt_size(nbytes: int) -> str:
@@ -95,7 +86,7 @@ def run_workspace() -> None:
     mdir = models_dir(cfg)
 
     while True:
-        header("My Workspace")
+        screen("My Workspace")
 
         # ── Disk summary ──────────────────────────────────────────────────────
         used, total = _disk_usage_summary(nfs)
@@ -160,20 +151,19 @@ def run_workspace() -> None:
             console.print(Panel(mdl_table, title="[bold]Downloaded Models[/]", expand=False))
 
         # ── Actions ───────────────────────────────────────────────────────────
-        choice = questionary.select(
+        choice = select_menu(
             "Action:",
-            choices=[
+            [
                 "Browse my files",
                 "Upload data",
                 "Download a model",
                 "Build / manage environments",
                 "Delete a model",
-                "Back to main menu",
             ],
-            style=_STYLE,
-        ).ask()
+            back=BACK_TO_MAIN,
+        )
 
-        if choice is None or choice == "Back to main menu":
+        if choice is None:
             return
         elif choice == "Browse my files":
             from iitgpu.files import file_manager
