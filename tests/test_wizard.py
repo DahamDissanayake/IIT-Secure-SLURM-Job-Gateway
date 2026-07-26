@@ -17,7 +17,7 @@ _MODULE_LEVEL_NAMES = {
     "panel", "shutil", "getpass", "questionary",
     "JobSpec", "make_job_folder", "render_sbatch", "resource_defaults",
     "submit_job", "load_config", "jobs_dir",
-    "err", "header", "info", "kv", "ok", "warn",
+    "err", "info", "kv", "ok", "warn", "screen", "select_menu",
     "clean_run_command", "in_jail", "safe_listdir", "auditclient",
 }
 

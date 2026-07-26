@@ -13,8 +13,6 @@ from iitgpu.launchspec import (SIZES, LaunchSpec, apply_size, availability_line,
 from iitgpu.slurm import get_node_stats
 from iitgpu.ui import console, info, select_menu, warn
 
-_STYLE = None  # set by wizard at import-time hookup if desired; questionary default otherwise
-
 _TIME_PRESETS = [("1h", "01:00:00"), ("2h", "02:00:00"),
                  ("4h", "04:00:00"), ("8h (cluster max)", "08:00:00")]
 
@@ -120,14 +118,14 @@ def _edit_size(ls: LaunchSpec, stats) -> None:
                            cpus=s.cpus, mem_gb=s.mem_gb)
         label = f"{size_label(probe)}  {size_availability(s.gpu_shards, stats)}"
         choices.append(label); mapping[label] = key
-    sel = questionary.select("Size:", choices=choices).ask()
+    sel = select_menu("Size:", choices)
     if sel:
         apply_size(ls, mapping[sel])
 
 
 def _edit_time(ls: LaunchSpec) -> None:
     labels = [l for l, _ in _TIME_PRESETS] + ["custom (HH:MM)"]
-    sel = questionary.select("Time limit:", choices=labels).ask()
+    sel = select_menu("Time limit:", labels)
     if sel is None:
         return
     for label, val in _TIME_PRESETS:
@@ -169,7 +167,7 @@ def _edit_env(ls: LaunchSpec, cfg) -> None:
             prebuilt = []   # permission denied etc. — menu still offers own-path/container/none
     choices = [f"prebuilt: {Path(p).name}" for p in prebuilt] + [
         "own conda env (path)", "own venv (path)", "container image (.sif)", "none (system python)"]
-    sel = questionary.select("Environment:", choices=choices).ask()
+    sel = select_menu("Environment:", choices)
     if sel is None:
         return
 
@@ -314,7 +312,7 @@ _HUB_CHOICES = ["Launch", "Change script", "Change size", "Change time limit",
 
 def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
             deps_prompt=None, preview=None) -> str | None:
-    """Loop until Launch / Save as template / Cancel. Mutates ls in place.
+    """Loop until Launch / Save as template / Back. Mutates ls in place.
 
     *preview* is an optional `LaunchSpec -> str` renderer for the Advanced menu's
     "view generated sbatch". It is injected rather than imported so review.py

@@ -19,7 +19,7 @@ from iitgpu.launchspec import (LaunchSpec, apply_size, default_spec, from_rerun,
                                from_template, recent_scripts, to_job_spec)
 from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
-from iitgpu.ui import BACK, STYLE, err, info, kv, ok, panel, screen, select_menu, warn
+from iitgpu.ui import STYLE, err, info, kv, ok, panel, screen, select_menu, warn
 from iitgpu.validate import clean_run_command, in_jail, safe_listdir
 
 
