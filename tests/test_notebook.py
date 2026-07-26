@@ -226,6 +226,31 @@ def test_notebook_sbatch_uses_identity_provider_token(tmp_path):
     assert "--ServerApp.token" not in script
 
 
+def test_notebook_sbatch_terminal_opens_in_user_own_folder(tmp_path):
+    """--ServerApp.root_dir scopes the file browser to the user's own folder,
+    but JupyterLab terminals spawn in the server process's cwd, not root_dir.
+    #SBATCH --chdir points the process at the job's per-run folder, so without
+    an explicit cd, terminals opened there instead of the user's own space
+    (reported live). The script must cd into IIT_USER_ROOT before launch."""
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    assert 'cd "$IIT_USER_ROOT"' in script
+    # Must happen after IIT_USER_ROOT is defined/created, and before launch.
+    assert script.index('IIT_USER_ROOT="/shared/users/$USER"') < script.index('cd "$IIT_USER_ROOT"')
+    assert script.index('cd "$IIT_USER_ROOT"') < script.index("jupyter lab")
+
+
+def test_notebook_sbatch_terminal_cd_also_applies_to_container(tmp_path):
+    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec(container_image="/shared/images/data-science.sif")
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    assert 'cd "$IIT_USER_ROOT"' in script
+    assert script.index('cd "$IIT_USER_ROOT"') < script.index("apptainer exec")
+
+
 def test_notebook_sbatch_token_echo_uses_double_quotes(tmp_path):
     from iitgpu.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()

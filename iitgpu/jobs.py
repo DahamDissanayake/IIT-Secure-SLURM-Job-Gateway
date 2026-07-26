@@ -529,6 +529,12 @@ def render_notebook_sbatch(
         f'echo "Then open in browser: http://127.0.0.1:$IIT_PORT/lab?token=$JUPYTER_TOKEN"',
         "echo '================================================='",
         "",
+        # --ServerApp.root_dir scopes the file browser to the user's own
+        # folder, but JupyterLab terminals open in the server process's cwd,
+        # not root_dir -- #SBATCH --chdir left that pointed at the job's
+        # per-run folder, so terminals opened there instead of the user's
+        # own space. cd into IIT_USER_ROOT right before launch so both match.
+        'cd "$IIT_USER_ROOT"',
         launcher,
     ]
     return "\n".join(lines) + "\n"
