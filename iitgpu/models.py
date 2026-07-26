@@ -19,19 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import questionary
-from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import Config, models_dir, make_shared_writable
-from iitgpu.ui import err, header, info, kv, ok, warn
+from iitgpu.ui import BACK_TO_MAIN, STYLE, err, info, kv, ok, screen, select_menu, warn
 
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-])
+_STYLE = STYLE
 
 
 @dataclass
@@ -182,7 +175,7 @@ def download_url(cfg: Config, url: str, name: str) -> tuple[bool, str]:
 
 
 def _list_models(cfg: Config) -> None:
-    header("Model Library")
+    screen("Model Library")
     entries = load_registry(cfg)
     if not entries:
         info("No models registered yet.")
@@ -201,7 +194,7 @@ def _list_models(cfg: Config) -> None:
 
 
 def _download_hf_interactive(cfg: Config) -> None:
-    header("Download HuggingFace Model")
+    screen("Download HuggingFace Model")
     repo = questionary.text(
         "HuggingFace repo ID (e.g. meta-llama/Llama-3-8B):",
         style=_STYLE,
@@ -217,7 +210,7 @@ def _download_hf_interactive(cfg: Config) -> None:
 
 
 def _download_url_interactive(cfg: Config) -> None:
-    header("Download Model from URL")
+    screen("Download Model from URL")
     url = questionary.text("URL:", style=_STYLE).ask()
     if not url or not url.strip():
         return
@@ -238,9 +231,9 @@ def _remove_interactive(cfg: Config) -> None:
     if not entries:
         info("No models to remove.")
         return
-    choices = [f"{e.name}  ({e.source}, {e.size_mb} MB)" for e in entries] + ["[back]"]
-    choice = questionary.select("Select model to remove from registry:", choices=choices, style=_STYLE).ask()
-    if choice is None or choice == "[back]":
+    choices = [f"{e.name}  ({e.source}, {e.size_mb} MB)" for e in entries]
+    choice = select_menu("Select model to remove from registry:", choices)
+    if choice is None:
         return
     name = choice.split("  ")[0]
     if not questionary.confirm(f"Remove '{name}' from registry? (files are NOT deleted)", default=False, style=_STYLE).ask():
@@ -253,19 +246,18 @@ def _remove_interactive(cfg: Config) -> None:
 
 def model_menu(cfg: Config) -> None:
     while True:
-        header("Model Library")
-        choice = questionary.select(
+        screen("Model Library")
+        choice = select_menu(
             "Model options:",
-            choices=[
+            [
                 "List models",
                 "Download from HuggingFace Hub",
                 "Download from URL",
                 "Remove from registry",
-                "Back to main menu",
             ],
-            style=_STYLE,
-        ).ask()
-        if choice is None or choice == "Back to main menu":
+            back=BACK_TO_MAIN,
+        )
+        if choice is None:
             return
         if choice == "List models":
             _list_models(cfg)
