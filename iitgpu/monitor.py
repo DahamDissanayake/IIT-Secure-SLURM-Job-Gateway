@@ -4,25 +4,20 @@ import shlex
 from pathlib import Path
 
 import questionary
-from questionary import Style
 from rich.table import Table
 
 from iitgpu import auditclient
 from iitgpu.slurm import (cancel, hold, release, requeue, queue,
                           job_detail, job_efficiency, filtered_history)
-from iitgpu.ui import console, err, header, info, kv, ok, warn
+from iitgpu.ui import (BACK_TO_MAIN, STYLE, console, err, info, kv, ok,
+                       screen, select_menu, warn)
 from iitgpu.validate import in_jail, safe_listdir
 
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-])
+_STYLE = STYLE
 
 
 def show_queue() -> None:
-    header("My Job Queue")
+    screen("My Job Queue")
     entries = queue(user=getpass.getuser())
     if not entries:
         info("No jobs in queue.")
@@ -46,28 +41,26 @@ def cancel_job() -> None:
 
 
 def manage_job() -> None:
-    header("Manage Job")
+    screen("Manage Job")
     entries = queue(user=getpass.getuser())
     if not entries:
         info("No active jobs.")
         return
-    choices = [f"{e.job_id}  {e.name}  [{e.state}]" for e in entries] + ["[back]"]
-    choice = questionary.select("Select a job:", choices=choices, style=_STYLE).ask()
-    if choice is None or choice == "[back]":
+    choices = [f"{e.job_id}  {e.name}  [{e.state}]" for e in entries]
+    choice = select_menu("Select a job:", choices)
+    if choice is None:
         return
     job_id = choice.split()[0]
 
-    action = questionary.select(
+    action = select_menu(
         f"Action for job {job_id}:",
-        choices=["Cancel", "Hold", "Release", "Requeue", "Details + efficiency", "[back]"],
-        style=_STYLE,
-    ).ask()
-    if action is None or action == "[back]":
+        ["Cancel", "Hold", "Release", "Requeue", "Details + efficiency"])
+    if action is None:
         return
 
     if action == "Details + efficiency":
         from iitgpu.ui import console
-        header(f"Job {job_id} detail")
+        screen(f"Job {job_id} detail")
         console.print(job_detail(job_id))
         console.print()
         console.print("[bold cyan]── Efficiency (seff) ──[/]")
@@ -114,13 +107,13 @@ def tail_log(log_path: str, lines: int | None = None) -> None:
 
     all_lines = text.splitlines()
     if lines is not None:
-        header(f"Log: {p.name}  (last {min(lines, len(all_lines))} of {len(all_lines)} lines)")
+        screen(f"Log: {p.name}  (last {min(lines, len(all_lines))} of {len(all_lines)} lines)")
         for line in all_lines[-lines:]:
             console.print(line, markup=False, highlight=False)
         return
 
     # Full log via pager so the whole thing is scrollable + searchable.
-    header(f"Log: {p.name}  ({len(all_lines)} lines)  —  arrows/PgUp to scroll, '/' to search, 'q' to quit")
+    screen(f"Log: {p.name}  ({len(all_lines)} lines)  —  arrows/PgUp to scroll, '/' to search, 'q' to quit")
     with console.pager(styles=False):
         # markup/highlight off: log text (tracebacks, "[Errno 13]", etc.) must
         # render literally and not be interpreted as Rich markup.
@@ -129,7 +122,7 @@ def tail_log(log_path: str, lines: int | None = None) -> None:
 
 
 def browse_and_tail_log() -> None:
-    header("View Job Log")
+    screen("View Job Log")
     from iitgpu.config import load_config, jobs_dir
     cfg = load_config()
     user_dir = str(Path(jobs_dir(cfg)) / getpass.getuser())
@@ -137,10 +130,8 @@ def browse_and_tail_log() -> None:
     if not folders:
         info("No job folders found.")
         return
-    choice = questionary.select(
-        "Select job folder:", choices=sorted(folders, reverse=True) + ["[back]"], style=_STYLE
-    ).ask()
-    if choice is None or choice == "[back]":
+    choice = select_menu("Select job folder:", sorted(folders, reverse=True))
+    if choice is None:
         return
     job_folder = str(Path(user_dir) / choice)
     if not in_jail(job_folder):
@@ -150,15 +141,15 @@ def browse_and_tail_log() -> None:
     if not logs:
         info("No log files in that folder.")
         return
-    log_choice = questionary.select("Select log file:", choices=logs + ["[back]"], style=_STYLE).ask()
-    if log_choice is None or log_choice == "[back]":
+    log_choice = select_menu("Select log file:", logs)
+    if log_choice is None:
         return
     tail_log(str(Path(job_folder) / log_choice))
 
 
 def cluster_status() -> None:
     from iitgpu.slurm import get_partitions
-    header("Cluster Status")
+    screen("Cluster Status")
     partitions = get_partitions()
     if not partitions:
         warn("Could not retrieve partition info.")
@@ -176,19 +167,18 @@ def cluster_status() -> None:
 
 def monitor_menu() -> None:
     while True:
-        header("Monitor")
-        choice = questionary.select(
+        screen("Monitor")
+        choice = select_menu(
             "Monitor options:",
-            choices=[
+            [
                 "View my queue",
                 "Cancel a job",
                 "View job log",
                 "View hardware stats",
-                "Back to main menu",
             ],
-            style=_STYLE,
-        ).ask()
-        if choice is None or choice == "Back to main menu":
+            back=BACK_TO_MAIN,
+        )
+        if choice is None:
             return
         if choice == "View my queue":
             show_queue()
@@ -211,10 +201,8 @@ def follow_log() -> None:
     if not folders:
         info("No job folders found.")
         return
-    choice = questionary.select(
-        "Follow which job folder?", choices=sorted(folders, reverse=True) + ["[back]"], style=_STYLE
-    ).ask()
-    if choice is None or choice == "[back]":
+    choice = select_menu("Follow which job folder?", sorted(folders, reverse=True))
+    if choice is None:
         return
     folder = str(Path(user_dir) / choice)
     if not in_jail(folder):
@@ -223,7 +211,7 @@ def follow_log() -> None:
     if not logs:
         info("No .out file yet."); return
     log_path = str(Path(folder) / sorted(logs)[0])
-    header(f"Following {Path(log_path).name}  (Ctrl-C to stop)")
+    screen(f"Following {Path(log_path).name}  (Ctrl-C to stop)")
     try:
         pos = 0
         for _ in range(100000):  # bounded so it can't run forever in a TUI
@@ -246,7 +234,7 @@ def show_history() -> None:
     from iitgpu.config import load_config, jobs_dir, is_admin
     from rich.table import Table
     cfg = load_config()
-    header("Job History")
+    screen("Job History")
     state = questionary.select(
         "Filter by state:",
         choices=["All", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"], style=_STYLE,
@@ -365,12 +353,8 @@ def rerun_job() -> None:
     if not folders:
         info("No job folders found.")
         return
-    choice = questionary.select(
-        "Rerun which job?",
-        choices=sorted(folders, reverse=True) + ["[back]"],
-        style=_STYLE,
-    ).ask()
-    if choice is None or choice == "[back]":
+    choice = select_menu("Rerun which job?", sorted(folders, reverse=True))
+    if choice is None:
         return
 
     job_folder = str(Path(user_dir) / choice)
