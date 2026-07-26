@@ -394,12 +394,12 @@ def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
 def _qos_menu(style) -> None:
     import questionary
     from rich.table import Table
-    from iitgpu.ui import console, header, info, ok, err, warn
+    from iitgpu.ui import BACK, console, info, ok, err, screen, select_menu, warn
 
     while True:
-        header("QOS / Limits")
         rows = list_qos()
         if not rows:
+            screen("QOS / Limits")
             warn("No QOS data (sacctmgr unavailable)."); return
 
         t = Table(show_header=True, header_style="bold cyan", show_lines=False)
@@ -409,20 +409,18 @@ def _qos_menu(style) -> None:
         t.add_column("Priority")
         for r in rows:
             t.add_row(r["name"], r["max_wall"], str(r["max_gpu"]), r["priority"])
-        console.print(t)
+        screen("QOS / Limits", status=t)
 
         qos_names = [r["name"] for r in rows]
-        qname = questionary.select(
-            "Select QOS to edit:", choices=qos_names + ["Back"], style=style).ask()
-        if qname is None or qname == "Back":
+        qname = select_menu("Select QOS to edit:", qos_names)
+        if qname is None:
             return
 
         current = next((r for r in rows if r["name"] == qname), {})
-        field = questionary.select(
+        field = select_menu(
             "Field to change:",
-            choices=["Max Wall Time", "Max GPUs per user", "Priority", "Back"],
-            style=style).ask()
-        if field is None or field == "Back":
+            ["Max Wall Time", "Max GPUs per user", "Priority"])
+        if field is None:
             continue
 
         if field == "Max Wall Time":
@@ -621,9 +619,9 @@ def _view_audit_log(style) -> None:
 def _view_users(style) -> None:
     import questionary
     from rich.table import Table
-    from iitgpu.ui import console, header, info, warn
+    from iitgpu.ui import console, info, screen, warn
 
-    header("User Roster")
+    screen("User Roster")
     data = daemonclient.view_roster()
     users = data.get("users", [])
     drift = data.get("drift", {})
@@ -902,24 +900,30 @@ def _login_as_menu(style) -> None:
 
 def admin_menu() -> None:
     import questionary
-    from questionary import Style, Separator
+    from questionary import Separator
     from rich.table import Table
-    from iitgpu.ui import console, header, info, ok, err, warn
+    from iitgpu.ui import STYLE, console, info, ok, err, screen, select_menu, warn
 
     cfg = load_config()
     if not is_admin(cfg):
         warn("Admin panel is restricted to members of the admin group.")
         return
 
-    style = Style([("qmark", "fg:cyan bold"), ("pointer", "fg:cyan bold")])
+    style = STYLE
     node_default = "iit-MS-7E06"
 
     while True:
-        header("Admin Panel")
         _mail_state = "OFF — disabled" if is_mail_disabled() else "ON"
-        choice = questionary.select(
+        _maint = get_maintenance()
+        _n_users = len(list_gpuusers())
+        status = (
+            f"[bold]{_n_users}[/] active user(s)   [dim]·[/]   Mail: {_mail_state}"
+            + ("   [dim]·[/]   [yellow]Maintenance ON[/]" if _maint else "")
+        )
+        screen("Admin Panel", status=status)
+        choice = select_menu(
             "Select action:",
-            choices=[
+            [
                 Separator("──  User Management  ──────────────────────────"),
                 "  Provision user",
                 "  Offboard user",
@@ -940,17 +944,12 @@ def admin_menu() -> None:
                 "  Service health",
                 "  Mail delivery log",
                 f"  Mail service: {_mail_state}",
-                Separator("───────────────────────────────────────────────"),
-                "  Back",
             ],
-            style=style,
-        ).ask()
+        )
 
         if choice is None:
             return
         choice = choice.strip()
-        if choice == "Back":
-            return
 
         if choice == "Drain node":
             node = questionary.text("Node:", default=node_default, style=style).ask()
