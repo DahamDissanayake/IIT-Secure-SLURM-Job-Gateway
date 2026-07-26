@@ -1,33 +1,33 @@
 # iitgpu/menu.py
 import questionary
-from questionary import Style
 
 from iitgpu.config import load_config, jobs_dir
-from iitgpu.ui import header, info, kv
-
-_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:magenta bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-])
+from iitgpu.ui import BACK_TO_MAIN, STYLE, info, screen, select_menu
 
 _MAIN_ITEMS = [
     "1. New Job       (JupyterLab, script, or shell — pick, review, launch)",
     "2. My Workspace  (files, models, environments)",
     "3. Jobs          (queue, history, logs, rerun)",
     "4. Settings      (health check, shell, cluster status, hardware)",
-    "5. Quit",
 ]
+
+
+def _main_status() -> str:
+    """One-line cluster verdict — the same live availability language the
+    launch review hub already shows, at the point the user is about to
+    decide what to do."""
+    try:
+        from iitgpu.slurm import get_node_stats
+        from iitgpu.splash import resource_status_line
+        return resource_status_line(get_node_stats())
+    except Exception:
+        return "[dim]cluster stats unavailable[/]"
 
 
 def run_menu() -> None:
     from iitgpu.config import load_config as _lc, is_admin as _ia
     _admin = _ia(_lc())
     while True:
-        header("Main Menu")
-
         # Maintenance banner
         _maint = None
         try:
@@ -46,22 +46,21 @@ def run_menu() -> None:
             )
             console.print(Panel(_body, border_style="yellow", expand=False))
             if not _admin:
+                screen("Main Menu")
                 info("[dim]The cluster is currently unavailable. Please try again later.[/]")
                 questionary.select(
-                    "Select an option:", choices=["Quit"], style=_STYLE
+                    "Select an option:", choices=["Quit"], style=STYLE
                 ).ask()
                 info("Goodbye.")
                 return
 
+        screen("Main Menu", status=_main_status())
         _choices = list(_MAIN_ITEMS)
         if _admin:
-            _choices.insert(len(_choices) - 1,
-                            "6. Admin         (cluster ops, users, audit)")
-        choice = questionary.select(
-            "Select an option:", choices=_choices, style=_STYLE
-        ).ask()
+            _choices.append("5. Admin         (cluster ops, users, audit)")
+        choice = select_menu("Select an option:", _choices, back="Quit")
 
-        if choice is None or choice.startswith("5."):
+        if choice is None:
             info("Goodbye.")
             return
 
@@ -79,9 +78,28 @@ def run_menu() -> None:
         elif choice.startswith("4."):
             _settings_menu()
 
-        elif choice.startswith("6."):
+        elif choice.startswith("5."):
             from iitgpu.admin import admin_menu
             admin_menu()
+
+
+def _jobs_status() -> str:
+    """My queued/running count + free GPU slices — the two numbers someone
+    opening the Jobs menu actually wants to know before picking a screen."""
+    try:
+        from iitgpu.slurm import get_node_stats, queue
+        import getpass
+        mine = queue(user=getpass.getuser())
+        running = sum(1 for e in mine if e.state == "RUNNING")
+        pending = sum(1 for e in mine if e.state == "PENDING")
+        stats = get_node_stats()
+        free = max(0, stats.shard_total - stats.shard_alloc) if stats and stats.shard_total else None
+        parts = [f"[bold]My jobs:[/] {running} running, {pending} queued"]
+        if free is not None:
+            parts.append(f"[dim]·[/] {free}/{stats.shard_total} GPU slices free")
+        return "  ".join(parts)
+    except Exception:
+        return "[dim]status unavailable[/]"
 
 
 def _jobs_menu() -> None:
@@ -90,10 +108,10 @@ def _jobs_menu() -> None:
                                 show_history, rerun_job)
 
     while True:
-        header("Jobs")
-        choice = questionary.select(
+        screen("Jobs", status=_jobs_status())
+        choice = select_menu(
             "Jobs options:",
-            choices=[
+            [
                 "Live dashboard  (auto-refresh)",
                 "View queue",
                 "Manage a job  (cancel/hold/release/requeue/details)",
@@ -105,12 +123,11 @@ def _jobs_menu() -> None:
                 "Usage & accounting",
                 "My running services",
                 "Cluster status",
-                "Back to main menu",
             ],
-            style=_STYLE,
-        ).ask()
+            back=BACK_TO_MAIN,
+        )
 
-        if choice is None or choice == "Back to main menu":
+        if choice is None:
             return
         elif "Live dashboard" in choice:
             run_dashboard()
@@ -136,27 +153,29 @@ def _jobs_menu() -> None:
             _show_cluster_status()
 
 
+def _settings_status(cfg) -> str:
+    return f"[dim]NFS root:[/] {cfg.nfs_root}"
+
+
 def _settings_menu() -> None:
-    from iitgpu.config import load_config as _lc, is_admin as _ia
+    from iitgpu.config import load_config as _lc
     _cfg = _lc()
-    _admin = _ia(_cfg)
 
     while True:
-        header("Settings")
-        _choices = [
-            "Cluster health check",
-            "Build environment",
-            "Install prebuilt environment",
-            "Run smoke test",
-            "Advanced SLURM shell",
-        ]
-        _choices.append("Back to main menu")
+        screen("Settings", status=_settings_status(_cfg))
+        choice = select_menu(
+            "Settings options:",
+            [
+                "Cluster health check",
+                "Build environment",
+                "Install prebuilt environment",
+                "Run smoke test",
+                "Advanced SLURM shell",
+            ],
+            back=BACK_TO_MAIN,
+        )
 
-        choice = questionary.select(
-            "Settings options:", choices=_choices, style=_STYLE
-        ).ask()
-
-        if choice is None or choice == "Back to main menu":
+        if choice is None:
             return
         elif choice == "Cluster health check":
             from iitgpu.setup import check_cluster_health
@@ -177,13 +196,12 @@ def _settings_menu() -> None:
             run_shell()
 
 
-
 def _show_cluster_status() -> None:
     from iitgpu.slurm import get_partitions
     from iitgpu.ui import console, warn
     from rich.table import Table
 
-    header("Cluster Status")
+    screen("Cluster Status")
     partitions = get_partitions()
     if not partitions:
         warn("Could not retrieve partition info.")
@@ -199,4 +217,3 @@ def _show_cluster_status() -> None:
             p.name, f"[{s}]{p.state}[/]", str(p.nodes), str(p.gpus_per_node)
         )
     console.print(table)
-
