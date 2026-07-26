@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
+from iitgpu.ui import BACK, BACK_TO_MAIN
 from iitgpu.upload import (
     _validate_folder_name,
     _ensure_folder,
@@ -81,19 +82,19 @@ class TestDownloadFromUrl:
 
     def test_rejects_ftp_url(self, capsys):
         with patch("questionary.text", return_value=self._make_text_mock("ftp://evil.com/file")), \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             _download_from_url("/shared/folder")
         out = capsys.readouterr().out
         assert "https" in out or "http" in out  # err message shown
 
     def test_rejects_empty_input(self):
         with patch("questionary.text", return_value=self._make_text_mock("")), \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             _download_from_url("/shared/folder")  # should return without subprocess
 
     def test_rejects_path_outside_jail(self):
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/file.tar")), \
-             patch("iitgpu.upload.header"), \
+             patch("iitgpu.upload.screen"), \
              patch("iitgpu.upload.in_jail", return_value=False), \
              patch("iitgpu.upload.auditclient"), \
              patch("subprocess.run") as mock_run:
@@ -102,7 +103,7 @@ class TestDownloadFromUrl:
 
     def test_logs_url_to_audit(self):
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/data.zip")), \
-             patch("iitgpu.upload.header"), \
+             patch("iitgpu.upload.screen"), \
              patch("iitgpu.upload.in_jail", return_value=True), \
              patch("iitgpu.upload.auditclient") as mock_audit, \
              patch("subprocess.run", return_value=MagicMock(returncode=0)), \
@@ -123,7 +124,7 @@ class TestDownloadFromUrl:
             return MagicMock(returncode=0)
 
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/data.tar")), \
-             patch("iitgpu.upload.header"), \
+             patch("iitgpu.upload.screen"), \
              patch("iitgpu.upload.in_jail", return_value=True), \
              patch("iitgpu.upload.auditclient"), \
              patch("iitgpu.upload.info"), \
@@ -145,7 +146,7 @@ class TestBrowseFolder:
     def test_empty_folder(self, tmp_path, capsys):
         with patch("questionary.press_any_key_to_continue") as mock_key:
             mock_key.return_value.ask.return_value = None
-            with patch("iitgpu.upload.header"):
+            with patch("iitgpu.upload.screen"):
                 _browse_folder(str(tmp_path))
         out = capsys.readouterr().out
         assert "empty" in out.lower()
@@ -155,7 +156,7 @@ class TestBrowseFolder:
         (tmp_path / "subdir").mkdir()
         with patch("questionary.press_any_key_to_continue") as mock_key:
             mock_key.return_value.ask.return_value = None
-            with patch("iitgpu.upload.header"):
+            with patch("iitgpu.upload.screen"):
                 _browse_folder(str(tmp_path))
         out = capsys.readouterr().out
         assert "train.csv" in out
@@ -186,7 +187,7 @@ class TestRunUpload:
 
         monkeypatch.setattr(
             "questionary.select",
-            lambda *a, **kw: self._sel("__cancel__"),
+            lambda *a, **kw: self._sel(BACK),
         )
 
         from iitgpu.upload import run_upload
@@ -203,8 +204,8 @@ class TestRunUpload:
         existing = self._udir(tmp_path) / "my-dataset"
         existing.mkdir(parents=True)
 
-        # First select: pick the existing folder path; second: "back"
-        sel_responses = iter([str(existing), "back"])
+        # First select: pick the existing folder path; second: Back to main menu
+        sel_responses = iter([str(existing), BACK_TO_MAIN])
         monkeypatch.setattr(
             "questionary.select",
             lambda *a, **kw: self._sel(next(sel_responses)),
@@ -224,8 +225,8 @@ class TestRunUpload:
         monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
         monkeypatch.setattr("iitgpu.auditclient.log", lambda *a, **kw: None)
 
-        # First select: "create new"; second select: "back"
-        sel_responses = iter(["__new__", "back"])
+        # First select: "create new"; second select: Back to main menu
+        sel_responses = iter(["__new__", BACK_TO_MAIN])
         monkeypatch.setattr(
             "questionary.select",
             lambda *a, **kw: self._sel(next(sel_responses)),
@@ -256,7 +257,7 @@ class TestRunUpload:
                 c.value if hasattr(c, "value") else c for c in choices
             )
             m = MagicMock()
-            m.ask.return_value = "__cancel__"
+            m.ask.return_value = BACK
             return m
 
         monkeypatch.setattr("questionary.select", fake_select)
@@ -267,7 +268,7 @@ class TestRunUpload:
         assert str(udir / "alpha") in choices_seen
         assert str(udir / "beta") in choices_seen
         assert "__new__" in choices_seen
-        assert "__cancel__" in choices_seen
+        assert BACK in choices_seen
 
     def test_no_existing_folders_still_offers_create(self, tmp_path, monkeypatch):
         """With an empty nfs_root, the prompt still offers [create new folder]."""
@@ -281,7 +282,7 @@ class TestRunUpload:
                 c.value if hasattr(c, "value") else c for c in choices
             )
             m = MagicMock()
-            m.ask.return_value = "__cancel__"
+            m.ask.return_value = BACK
             return m
 
         monkeypatch.setattr("questionary.select", fake_select)
@@ -290,7 +291,7 @@ class TestRunUpload:
         run_upload()
 
         assert "__new__" in choices_seen
-        assert "__cancel__" in choices_seen
+        assert BACK in choices_seen
 
     def test_audit_log_called_on_folder_open(self, tmp_path, monkeypatch):
         """run_upload logs data_folder_open after the folder is ready."""
@@ -306,7 +307,7 @@ class TestRunUpload:
         existing = self._udir(tmp_path) / "my-dataset"
         existing.mkdir(parents=True)
 
-        sel_responses = iter([str(existing), "back"])
+        sel_responses = iter([str(existing), BACK_TO_MAIN])
         monkeypatch.setattr(
             "questionary.select",
             lambda *a, **kw: self._sel(next(sel_responses)),
@@ -337,7 +338,7 @@ class TestRunUpload:
                 c.value if hasattr(c, "value") else c for c in choices
             )
             m = MagicMock()
-            m.ask.return_value = "__cancel__"
+            m.ask.return_value = BACK
             return m
 
         monkeypatch.setattr("questionary.select", fake_select)
@@ -371,7 +372,7 @@ class TestShowScpInstructions:
         cfg = self._make_cfg(gateway_host="10.35.4.100", gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -385,7 +386,7 @@ class TestShowScpInstructions:
         cfg = self._make_cfg(gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -398,7 +399,7 @@ class TestShowScpInstructions:
         cfg = self._make_cfg(gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -411,7 +412,7 @@ class TestShowScpInstructions:
         cfg = self._make_cfg()
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/my folder", cfg)
 
@@ -425,7 +426,7 @@ class TestShowScpInstructions:
         cfg = self._make_cfg()
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/my folder", cfg)
 
@@ -463,7 +464,7 @@ class TestUnzip:
         with patch("iitgpu.upload.questionary.select", return_value=sel), \
              patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
              patch("iitgpu.upload.auditclient"), \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
 
@@ -486,7 +487,7 @@ class TestUnzip:
         with patch("iitgpu.upload.questionary.select", return_value=sel), \
              patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
              patch("iitgpu.upload.auditclient"), \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
 
@@ -502,7 +503,7 @@ class TestUnzip:
         # No .zip present → must not raise, just inform and return.
         with patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
              patch("iitgpu.upload.questionary.select") as sel, \
-             patch("iitgpu.upload.header"):
+             patch("iitgpu.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
             sel.assert_not_called()
@@ -531,7 +532,7 @@ class TestRunUploadReturnsPath:
 
         sel_responses = iter([
             str(tmp_path / "users" / user),  # choose base upload folder
-            "back",                            # then Back
+            BACK_TO_MAIN,                       # then Back
         ])
         monkeypatch.setattr(
             "iitgpu.upload.questionary.select",
@@ -553,7 +554,7 @@ class TestRunUploadReturnsPath:
 
         monkeypatch.setattr(
             "iitgpu.upload.questionary.select",
-            lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: "__cancel__")})(),
+            lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: BACK)})(),
         )
         monkeypatch.setattr("iitgpu.upload.auditclient.log", lambda *a, **kw: None)
 

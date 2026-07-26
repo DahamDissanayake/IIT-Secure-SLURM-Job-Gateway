@@ -5,22 +5,15 @@ import subprocess
 from pathlib import Path
 
 import questionary
-from questionary import Style
 
 from iitgpu import auditclient
 from iitgpu.config import load_config, make_shared_writable
-from iitgpu.ui import console, ok, err, info, header
+from iitgpu.ui import BACK_TO_MAIN, STYLE, console, ok, err, info, screen, select_menu
 from iitgpu.validate import in_jail
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
-_STYLE = Style([
-    ("qmark",       "fg:cyan bold"),
-    ("question",    "bold"),
-    ("answer",      "fg:magenta bold"),
-    ("pointer",     "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-])
+_STYLE = STYLE
 
 
 def _validate_folder_name(name: str) -> bool:
@@ -40,7 +33,7 @@ def _show_scp_instructions(folder_path: str, cfg) -> None:
     user = getpass.getuser()
     host = cfg.gateway_host
     port = cfg.gateway_port
-    header("Upload via SCP  (zip first — it's faster & more reliable)")
+    screen("Upload via SCP  (zip first — it's faster & more reliable)")
 
     console.print(
         "\n[bold]Step 1 — On your computer, split your work into two folders[/] "
@@ -110,7 +103,7 @@ def _unzip_in_folder(folder_path: str, cfg) -> None:
     from iitgpu.validate import in_user_upload_jail
 
     user = getpass.getuser()
-    header("Unzip an uploaded .zip")
+    screen("Unzip an uploaded .zip")
     try:
         zips = sorted(
             p for p in Path(folder_path).iterdir()
@@ -204,7 +197,7 @@ def _unzip_in_folder(folder_path: str, cfg) -> None:
 
 
 def _browse_folder(folder_path: str) -> None:
-    header(f"Contents  —  {folder_path}")
+    screen(f"Contents  —  {folder_path}")
     try:
         entries = sorted(Path(folder_path).iterdir())
     except OSError as exc:
@@ -228,7 +221,7 @@ def _browse_folder(folder_path: str) -> None:
 
 
 def _download_from_url(folder_path: str) -> "str | None":
-    header("Download from URL")
+    screen("Download from URL")
     url = questionary.text(
         "URL to download  (https:// or http://):",
         style=_STYLE,
@@ -297,14 +290,13 @@ def run_upload() -> "str | None":
     _folder_choices = (
         [questionary.Choice(f"{n}  ({base / n})", str(base / n)) for n in _existing]
         + [questionary.Choice("[upload here — my data folder]", str(base)),
-           questionary.Choice("[create new sub-folder]",        "__new__"),
-           questionary.Choice("[cancel]",                        "__cancel__")]
+           questionary.Choice("[create new sub-folder]",        "__new__")]
     )
     prompt = f"Select a destination inside your folder ({base}):"
 
-    sel = questionary.select(prompt, choices=_folder_choices, style=_STYLE).ask()
+    sel = select_menu(prompt, _folder_choices)
 
-    if sel is None or sel == "__cancel__":
+    if sel is None:
         return
 
     if sel == "__new__":
@@ -339,14 +331,11 @@ def run_upload() -> "str | None":
         questionary.Choice("Unzip an uploaded .zip  (extract here, with progress)", "unzip"),
         questionary.Choice("Download from a URL  (wget / curl on the server)",      "url"),
         questionary.Choice("Browse folder contents",                                "browse"),
-        questionary.Choice("Back to main menu",                                     "back"),
     ]
 
     while True:
-        action = questionary.select(
-            "What would you like to do?", choices=choices, style=_STYLE
-        ).ask()
-        if action is None or action == "back":
+        action = select_menu("What would you like to do?", choices, back=BACK_TO_MAIN)
+        if action is None:
             break
         elif action == "scp":
             _show_scp_instructions(folder_path, cfg)
