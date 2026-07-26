@@ -185,9 +185,9 @@ def provision_user(username: str, admin: bool = False,
             username, email, effective_role, full_name, notes,
             must_change_pw=bool(password))
         if ok_db:
-            msg += "\n  ✔  user DB record created"
+            msg += "\n  OK  user DB record created"
         else:
-            msg += f"\n  ⚠  user DB record failed: {db_msg}"
+            msg += f"\n  WARN  user DB record failed: {db_msg}"
     auditclient.log("admin_provision_user",
                     detail=username,
                     meta={"role": role or ("admin" if admin else "tool"),
@@ -195,17 +195,17 @@ def provision_user(username: str, admin: bool = False,
     ok_pw = False
     if password:
         ok_pw, perr = set_user_password(username, password)
-        msg += "\n  ✔  password set" if ok_pw else f"\n  ⚠  password not set: {perr or 'chpasswd failed'}"
+        msg += "\n  OK  password set" if ok_pw else f"\n  WARN  password not set: {perr or 'chpasswd failed'}"
         if ok_pw:
             auditclient.log("password_change_required", detail=username)
     if email and ok_pw:
         from iitgpu import mailer as _mailer
         mail_ok, mail_msg = _mailer.send_welcome(username, email, full_name, password)
         if mail_ok:
-            msg += "\n  ✔  welcome email sent (with initial password)"
+            msg += "\n  OK  welcome email sent (with initial password)"
             auditclient.log("welcome_sent", detail=username, meta={"email": email})
         else:
-            msg += f"\n  ⚠  welcome email failed: {mail_msg} — hand credentials in person"
+            msg += f"\n  WARN  welcome email failed: {mail_msg} — hand credentials in person"
             auditclient.log("mail_failed", detail=f"welcome:{username}",
                             meta={"error": mail_msg})
 
@@ -505,7 +505,7 @@ def _provision_menu(style) -> None:
         return
 
     if role == "shell":
-        warn("[yellow bold]⚠  Shell user warning:[/]")
+        warn("[yellow bold]Shell user warning:[/]")
         warn("[yellow]This grants a real shell on the login node. Their activity is[/]")
         warn("[yellow]NOT audited by the tool. Use only for edge cases the tool[/]")
         warn("[yellow]cannot handle. They are still SLURM-capped via their association.[/]")

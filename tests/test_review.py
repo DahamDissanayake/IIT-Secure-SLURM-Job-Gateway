@@ -63,7 +63,7 @@ def test_run_hub_launch_and_cancel(monkeypatch):
 
     ls = default_spec("batch"); ls.script = "/x/y.py"
     monkeypatch.setattr(R, "get_node_stats", lambda: None)
-    monkeypatch.setattr(R.questionary, "select", _Ask(["🚀 Launch"]))
+    monkeypatch.setattr(R.questionary, "select", _Ask(["Launch"]))
     assert run_hub(ls, cfg=None, user="u",
                    browse_script=lambda: None, browse_data=lambda: None) == "launch"
 
@@ -175,7 +175,7 @@ def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
 
     ls = default_spec("batch")   # script left unset
     monkeypatch.setattr(R, "get_node_stats", lambda: None)
-    monkeypatch.setattr(R.questionary, "select", _Ask(["🚀 Launch", "Cancel"]))
+    monkeypatch.setattr(R.questionary, "select", _Ask(["Launch", "Cancel"]))
     result = run_hub(ls, cfg=None, user="u",
                      browse_script=lambda: None, browse_data=lambda: None)
     assert result is None
@@ -248,7 +248,7 @@ def test_hub_hides_script_and_args_for_non_batch_intents(monkeypatch):
 
     assert "Change args" not in seen["choices"]
     assert "Change script" not in seen["choices"]
-    assert "🚀 Launch" in seen["choices"]
+    assert "Launch" in seen["choices"]
 
 
 def test_hub_keeps_script_and_args_for_a_batch_job(monkeypatch):
@@ -359,7 +359,7 @@ def test_hub_hides_every_no_op_row_for_a_shell(monkeypatch):
     for gone in ("Change environment", "Change data / model", "Advanced…",
                  "Change script", "Change args"):
         assert gone not in seen["choices"], gone
-    assert seen["choices"] == ["🚀 Launch", "Change size", "Change time limit",
+    assert seen["choices"] == ["Launch", "Change size", "Change time limit",
                                "Save as template", "Cancel"]
 
     panel = _plain(render_hub(default_spec("shell"), None))

@@ -307,7 +307,7 @@ def _edit_advanced(ls: LaunchSpec, preview=None) -> None:
                                 border_style="cyan"))
 
 
-_HUB_CHOICES = ["🚀 Launch", "Change script", "Change size", "Change time limit",
+_HUB_CHOICES = ["Launch", "Change script", "Change size", "Change time limit",
                 "Change environment", "Change data / model", "Change args",
                 "Advanced…", "Save as template", "Cancel"]
 
@@ -340,7 +340,7 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
         sel = questionary.select("Select:", choices=choices).ask()
         if sel is None or sel == "Cancel":
             return None
-        if sel == "🚀 Launch":
+        if sel == "Launch":
             if ls.intent == "batch" and not ls.script:
                 warn("Pick a script first (Change script).")
                 continue

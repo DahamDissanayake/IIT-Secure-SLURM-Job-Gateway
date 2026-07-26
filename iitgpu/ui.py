@@ -20,15 +20,15 @@ def header(text: str) -> None:
 
 
 def ok(text: str) -> None:
-    console.print(f"[ok]✔  {text}[/]")
+    console.print(f"[ok]OK  {text}[/]")
 
 
 def warn(text: str) -> None:
-    console.print(f"[warn]⚠  {text}[/]")
+    console.print(f"[warn]WARN  {text}[/]")
 
 
 def err(text: str) -> None:
-    console.print(f"[err]✘  {text}[/]")
+    console.print(f"[err]ERROR  {text}[/]")
 
 
 def info(text: str) -> None:

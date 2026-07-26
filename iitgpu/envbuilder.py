@@ -398,7 +398,7 @@ def _run_pip_with_progress(
             if m:
                 if current_pkg:
                     console.print(
-                        f"  [bold green]✔[/]  {current_pkg:<42}"
+                        f"  [bold green]OK[/]  {current_pkg:<42}"
                         f"  [dim]{_fmt_size(current_total_b)}[/]"
                     )
                 filename        = m.group(1)
@@ -421,12 +421,12 @@ def _run_pip_with_progress(
             if "installing collected" in seg.lower():
                 if current_pkg:
                     console.print(
-                        f"  [bold green]✔[/]  {current_pkg:<42}"
+                        f"  [bold green]OK[/]  {current_pkg:<42}"
                         f"  [dim]{_fmt_size(current_total_b)}[/]"
                     )
                     current_pkg = None
                 console.print(
-                    "  [bold yellow]⚠[/]  Linking packages to NFS — "
+                    "  [bold yellow]WARN[/]  Linking packages to NFS — "
                     "this can take [bold]15–30 min[/bold] for large CUDA installs. "
                     "Do not interrupt."
                 )
@@ -455,7 +455,7 @@ def _run_pip_with_progress(
                 progress.update(
                     file_task,
                     completed=1, total=1,
-                    pkg="[bold green]✔  All packages installed[/bold green]",
+                    pkg="[bold green]OK  All packages installed[/bold green]",
                     sizes="", speed="", eta="",
                 )
 

@@ -127,7 +127,7 @@ def send_welcome(username: str, email: str, full_name: str = "",
 
         <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:10px 32px 4px">
           <div style="border-left:3px solid #EF4444;padding:14px 18px;background:#FEF2F2">
-            <p style="margin:0 0 6px;color:#B91C1C;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">⚠ Reset Your Password Immediately</p>
+            <p style="margin:0 0 6px;color:#B91C1C;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">Reset Your Password Immediately</p>
             <p style="margin:0;color:#991B1B;font-size:13px;line-height:1.7">This is a temporary password. <strong>As soon as you log in, you will be required to set a new password — do this right away.</strong> Do not share this password with anyone, and do not reuse it on other systems.</p>
           </div>
         </td></tr>"""
