@@ -458,6 +458,7 @@ def _make_stats(gpu_mem_used_mb: int = 12288, gpu_mem_total_mb: int = 32768):
     return NodeStats(
         state="ALLOCATED", cpu_load=1.0, cpu_total=32, cpu_alloc=16,
         mem_total_mb=131072, mem_alloc_mb=65536, gpu_total=1, gpu_alloc=1,
+        shard_total=4, shard_alloc=1,
         gpu_util=50, gpu_mem_used_mb=gpu_mem_used_mb,
         gpu_mem_total_mb=gpu_mem_total_mb,
         gpu_temp=60, gpu_power_w=200.0, cpu_util=40, cpu_load5=1.0,
@@ -521,9 +522,9 @@ def test_vram_check_present_in_wizard_source():
 
 def test_gpu_share_note_describes_a_partial_card():
     """A one-slice job must say so — resource sizing changed and nothing said."""
-    from iitgpu.jobs import SHARDS_PER_GPU, gpu_share_note
-    note = gpu_share_note(1)
-    assert f"1/{SHARDS_PER_GPU}" in note
+    from iitgpu.jobs import gpu_share_note
+    note = gpu_share_note(1, 4)
+    assert "1/4" in note
     assert "left for others" in note
 
 
@@ -1109,15 +1110,16 @@ def test_pick_finetune_model_skip_returns_empty(monkeypatch):
 
 
 def test_finetune_branch_sets_whole_gpu_and_prefers_its_env():
-    """Structural: the finetune branch must call apply_size(ls, "whole") and
-    thread prefer=_FINETUNE_ENV_NAME into _apply_default_env — the two things
-    that make it launch differently from a plain batch job."""
+    """Structural: the finetune branch must call apply_pods() to claim the
+    whole live pod count and thread prefer=_FINETUNE_ENV_NAME into
+    _apply_default_env — the two things that make it launch differently from
+    a plain batch job."""
     import inspect
     src = inspect.getsource(wizard.run_wizard)
     i = src.index("_FINETUNE_CHOICE:")
     j = src.index("break", i)
     branch = src[i:j]
-    assert 'apply_size(ls, "whole")' in branch
+    assert "apply_pods(ls, pod_count(_stats), _stats)" in branch
     assert "prefer=_FINETUNE_ENV_NAME" in branch
     assert "_pick_batch_script(" in branch
     assert "_pick_finetune_model(cfg)" in branch

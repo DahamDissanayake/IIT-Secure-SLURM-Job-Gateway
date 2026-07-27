@@ -12,10 +12,10 @@ import questionary
 
 from iitgpu import auditclient
 from iitgpu.config import load_config, jobs_dir, user_dir
-from iitgpu.jobs import (SHARDS_PER_GPU, JobSpec, build_interactive_cmd,
+from iitgpu.jobs import (JobSpec, build_interactive_cmd,
                          gpu_share_note, make_job_folder, pip_install_block,
                          render_notebook_sbatch, render_sbatch, resource_defaults)
-from iitgpu.launchspec import (LaunchSpec, apply_size, default_spec, from_rerun,
+from iitgpu.launchspec import (LaunchSpec, apply_pods, default_spec, from_rerun,
                                from_template, recent_scripts, to_job_spec)
 from iitgpu.review import run_hub
 from iitgpu.slurm import submit_job, get_node_stats
@@ -255,6 +255,14 @@ def _tier3_own_script(username: str, cfg) -> str | None:
         return text
 
 
+def _current_share_note(gpu_shards: int) -> str:
+    """gpu_share_note() is pure and needs the live pod total passed in --
+    this is the one place in the wizard flow that fetches it, so the three
+    call sites below don't each need their own get_node_stats() call."""
+    from iitgpu.pods import pod_count
+    return gpu_share_note(gpu_shards, pod_count(get_node_stats()))
+
+
 def _vram_check() -> bool:
     """State the VRAM situation at submit time. Asks nothing, blocks nothing.
 
@@ -275,7 +283,8 @@ def _vram_check() -> bool:
         total_gb = stats.gpu_mem_total_mb / 1024
         used_gb  = stats.gpu_mem_used_mb  / 1024
         free_gb  = total_gb - used_gb
-        slice_gb = total_gb / SHARDS_PER_GPU
+        from iitgpu.pods import pod_count
+        slice_gb = total_gb / pod_count(stats)
         info(f"GPU VRAM: [green]{free_gb:.1f} GB free[/]  "
              f"[dim]({used_gb:.1f} GB in use / {total_gb:.0f} GB total)[/]")
         info(f"Your slice's fair share is about {slice_gb:.0f} GB. "
@@ -727,7 +736,9 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
 
         if choice == _FINETUNE_CHOICE:
             ls = default_spec("batch")
-            apply_size(ls, "whole")
+            from iitgpu.pods import pod_count
+            _stats = get_node_stats()
+            apply_pods(ls, pod_count(_stats), _stats)
             _apply_default_env(ls, cfg, prefer=_FINETUNE_ENV_NAME)
             picked = _pick_batch_script(jdir, user, _browse_jail, _user_browse_start())
             if not picked:
@@ -822,7 +833,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         cmd = build_interactive_cmd(spec, partition=cfg.partition)
         info("Requesting an interactive GPU allocation — you will land in a shell")
         info("ON the compute node. It ends when you type 'exit' or the time limit hits.")
-        info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
+        info(f"GPU share: {_current_share_note(spec.gpu_shards)}")
         panel("Interactive command", " ".join(cmd))
         if not questionary.confirm(
             "Start interactive session now?", default=True, style=_STYLE
@@ -861,7 +872,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             gateway_host=cfg.gateway_host, gateway_port=int(cfg.gateway_port),
             requirements=ls.requirements, packages=ls.packages,
         )
-        info(f"GPU share: {gpu_share_note(spec.gpu_shards)}")
+        info(f"GPU share: {_current_share_note(spec.gpu_shards)}")
         _vram_check()
         panel("Generated notebook sbatch script", script_text)
 
@@ -925,7 +936,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
     _env_display = (spec.container_image or spec.conda_env or spec.venv_path
                     or "none (system python)")
     panel("Job Summary", (
-        f"  GPU share  : {gpu_share_note(spec.gpu_shards)}\n"
+        f"  GPU share  : {_current_share_note(spec.gpu_shards)}\n"
         f"  Time limit : {spec.time_limit or 'no limit'}\n"
         f"  Script     : {ls.script or '(none)'}\n"
         f"  Environment: {_env_display}\n"
