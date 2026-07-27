@@ -14,6 +14,20 @@ from iitgpu.ui import STYLE, err, header, info, ok, warn
 _STYLE = STYLE
 
 # Built-in presets — never written to disk, read-only.
+#
+# NOTE (pending Plan B): the sizing below is STILL HARDCODED. "PyTorch Training"
+# and "HuggingFace Fine-tune" ask for `gpu_shards: 4 / cpus: 16 / mem_gb: 60`,
+# which is "the whole node" only for as long as the cluster stays split into
+# exactly 4 pods of 8 CPU / 14 GB. Everything else in the app now derives its
+# sizing live from `iitgpu.pods` (pod count from gres/shard via scontrol,
+# per-pod CPU/RAM floor-divided from the node's real totals); these two presets
+# are the last fixed numbers, deliberately left out of Plan A's scope.
+#
+# Plan B makes the pod count admin-configurable, at which point these two must
+# become pod-count-derived too — e.g. store a pod count (or the "all" sentinel
+# that `jobs.TASK_POD_DEFAULTS` already uses) and resolve cpus/mem_gb through
+# `pods.resources_for()` at load time — or a resized cluster will hand out
+# templates that request more of the node than exists.
 _BUILTIN_PRESETS: dict[str, dict] = {
     "PyTorch Training": {
         "job_name": "pytorch_train",

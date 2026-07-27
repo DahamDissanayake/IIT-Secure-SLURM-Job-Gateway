@@ -232,7 +232,7 @@ The whole flow is three questions wide — what you want to do, what it runs on,
 
 | Row | What you can change |
 |---|---|
-| **Size** | Small (¼ GPU share) / Standard (¼ GPU share) / Whole GPU — each labelled *starts now* or *will queue*, based on live availability |
+| **Pods** | How many pods (GPU shares) to claim, 1 up to the node's live pod count — each row shows the CPU/RAM and estimated VRAM that many pods gets you, and is labelled *starts now* or *will queue*, based on live availability. If the cluster can't be read the row says *GPU availability unknown* instead of guessing |
 | **Time limit** | Presets up to the cluster's QOS ceiling, or a custom `HH:MM` (rejected if it exceeds the ceiling, since `sbatch` would reject it too) |
 | **Environment** | A prebuilt env from `/shared/envs/` (defaults to `data-science` if installed), your own conda env or venv, a jailed `.sif` container image, or plain system Python |
 | **Data / model** | Jailed folder browser for data, or a path / HuggingFace repo id for a model *(batch and notebook jobs)* |
@@ -610,7 +610,7 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 | Variable | Default | Purpose |
 |---|---|---|
 | `MAX_GPUS` | `8` | Ceiling on *whole* GPUs per job (not used for share-based requests) |
-| `MAX_GPU_SHARDS` | `4` | Ceiling on GPU shares per job — must equal `SHARDS_PER_GPU` in `slurm.conf` |
+| `MAX_GPU_SHARDS` | `4` | **Fallback** ceiling on GPU shares (pods) per job. The real ceiling is the node's live shard count read from `scontrol show node` (`iitgpu.pods.pod_count`); this value is only used when that reading is unavailable, so set it to the `Count=` in `gres.conf` |
 | `MAX_CPUS` | `64` | Ceiling on CPUs per job |
 | `MAX_MEM_GB` | `256` | Ceiling on memory (GB) per job |
 | `MAX_HOURS` | `72` | Ceiling on job duration |
@@ -671,11 +671,13 @@ Setup: fill `RESEND_API_KEY` in `deploy/secrets.env` (root:gpusync, `0640`). No 
 
 ## GPU sharing model
 
-By default SLURM gives a job the entire GPU it requests. This cluster instead splits the single physical GPU into **4 slices** (`gres/shard`) so JupyterLab/inference-sized jobs can run concurrently:
+By default SLURM gives a job the entire GPU it requests. This cluster instead splits the single physical GPU into **pods** (`gres/shard` — currently 4) so JupyterLab/inference-sized jobs can run concurrently:
 
+- **Nothing hardcodes the split.** The pod count is whatever `scontrol show node` currently reports for `gres/shard` (set by `Count=` in `gres.conf`), and per-pod CPU/RAM is floor-divided from the node's real `CPUTot`/`RealMemory` — both computed in `iitgpu/pods.py` (`pod_count()`, `pod_resources()`, `resources_for()`), the one place that math lives. Re-split the GPU in `gres.conf` and the tool follows on the next read, with no code change. On today's node (`CPUTot=32`, `RealMemory=62000`, `shard:4`) that works out to 4 pods of 8 CPU / 14 GB (2 GB reserved for the OS).
 - `render_*_sbatch()` (in `iitgpu/jobs.py`) emits `--gres=shard:N`, never `--gres=gpu:N`, for share-based tasks; CPU-only jobs omit `--gres` entirely.
-- One-slice tasks (notebook / interactive / inference) get ~¼ of the node's CPU and memory too (`_SLICE_CPUS`, `_SLICE_MEM_GB`) — splitting the GPU alone is pointless if 2 jobs still fight over all the RAM.
-- `train`/`finetune`/`custom` tasks request the whole card (all 4 slices) by default.
+- One-pod tasks (notebook / interactive / inference) get one pod's worth of CPU and memory too — splitting the GPU alone is pointless if 2 jobs still fight over all the RAM.
+- `train`/`finetune`/`custom` tasks request every pod on the node by default (`jobs.TASK_POD_DEFAULTS`, the `"all"` sentinel).
+- When the live reading is unavailable the tool says so ("GPU availability unknown") and keeps its built-in one-pod defaults, rather than claiming a share it cannot verify.
 - Shares are a **scheduling** split only, not VRAM isolation — 4 co-resident jobs share the physical 32 GB and can, in principle, OOM each other. The wizard's review hub shows a VRAM sanity check before launch. True hard isolation would require NVIDIA MPS (not configured) — MIG is not an option on a consumer RTX 5090.
 - The QOS enforces `MaxTRESPerUser=gres/gpu=1,gres/shard=4` — one whole GPU's worth of shares, whichever form a job requests.
 

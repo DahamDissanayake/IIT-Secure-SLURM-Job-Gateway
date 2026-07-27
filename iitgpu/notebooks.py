@@ -67,7 +67,7 @@ def launch_tensorboard() -> None:
     from pathlib import Path
     import questionary
     from iitgpu.config import jobs_dir
-    from iitgpu.jobs import JobSpec, make_job_folder, render_tensorboard_sbatch, resource_defaults
+    from iitgpu.jobs import JobSpec, make_job_folder, render_tensorboard_sbatch
     from iitgpu.slurm import submit_job
     from iitgpu.ui import STYLE, info, ok, err, kv, panel, screen
     from iitgpu.validate import in_jail
@@ -87,7 +87,9 @@ def launch_tensorboard() -> None:
     except (ValueError, AttributeError):
         port = 6006
 
-    d = resource_defaults("inference")
+    # TensorBoard is CPU-only and deliberately fixed-size (below), so no
+    # resource_defaults() lookup here — it would cost a live scontrol call per
+    # launch and its result was never read.
     spec = JobSpec(job_name="tensorboard", partition=cfg.partition, gpu_shards=0,
                    cpus=2, mem_gb=8, time_limit="08:00:00", run_command="",
                    task_type="tensorboard")
