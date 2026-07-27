@@ -3,7 +3,6 @@ import re
 
 from rich.console import Console
 
-from iitgpu.jobs import SHARDS_PER_GPU
 from iitgpu.launchspec import default_spec
 from iitgpu.review import render_hub, run_hub
 from iitgpu.slurm import NodeStats
@@ -13,8 +12,8 @@ from iitgpu.ui import BACK
 def _stats(free=3):
     return NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1,
-                     gpu_alloc=0, shard_total=SHARDS_PER_GPU,
-                     shard_alloc=SHARDS_PER_GPU - free)
+                     gpu_alloc=0, shard_total=4,
+                     shard_alloc=4 - free)
 
 
 def _plain(renderable) -> str:
@@ -25,13 +24,13 @@ def _plain(renderable) -> str:
 
 
 def test_hub_shows_every_field_and_availability():
-    ls = default_spec("batch")
+    ls = default_spec("batch", _stats(3))
     ls.script = "/shared/users/u/train.py"
     ls.conda_env = "/shared/envs/data-science"
     out = _plain(render_hub(ls, _stats(3)))
     assert "train.py" in out
     assert "data-science" in out
-    assert "Standard" in out and "8 CPU" in out
+    assert "1 pod" in out and "8 CPU" in out
     assert "3/4 slices free" in out
     assert "4h" in out or "04:00:00" in out
 
@@ -44,9 +43,10 @@ def test_hub_states_vram_is_shared_and_not_enforced():
 
 def test_hub_shows_gpu_share_note():
     from iitgpu.jobs import gpu_share_note
+    from iitgpu.pods import pod_count
     ls = default_spec("batch")
     out = _plain(render_hub(ls, None))
-    assert gpu_share_note(ls.gpu_shards).split("(")[0].strip() in out
+    assert gpu_share_note(ls.gpu_shards, pod_count(None)).split("(")[0].strip() in out
 
 
 def test_hub_availability_unknown_degrades():
@@ -73,23 +73,35 @@ def test_run_hub_launch_and_cancel(monkeypatch):
                    browse_script=lambda: None, browse_data=lambda: None) is None
 
 
-def test_run_hub_size_editor_applies_choice(monkeypatch):
+def test_run_hub_pod_editor_applies_choice(monkeypatch):
     """Fallback per brief note: the scripted _Sel sequence proved brittle
     against the real call pattern (run_hub's post-edit script-guard consumes
-    an extra select() call the fixture didn't account for). Drive _edit_size
-    directly instead — the wiring under test is apply_size, not the hub loop."""
+    an extra select() call the fixture didn't account for). Drive _edit_pods
+    directly instead — the wiring under test is apply_pods, not the hub loop.
+
+    The stepper offers one row per available pod (1..n); picking the last row
+    (n pods == the whole GPU) must resize gpu_shards/cpus/mem_gb to exactly
+    what resources_for(n, stats) derives."""
     import iitgpu.review as R
+    from iitgpu.pods import pod_count, resources_for
 
-    class _Ask:
-        def __init__(self, answer): self.answer = answer
-        def __call__(self, *a, **kw): return self
-        def ask(self): return self.answer
+    stats = _stats(3)
+    n = pod_count(stats)
+    offered = {}
 
+    def _sel(question, choices=None, **kw):
+        offered["choices"] = choices
+        picked = choices[n - 1]   # the k == n ("whole GPU") row
+        return type("A", (), {"ask": lambda self: picked})()
+
+    monkeypatch.setattr(R.questionary, "select", _sel)
     ls = default_spec("batch")
-    choice = "Whole GPU — 4/4 GPU · 16 CPU · 60 GB  — availability unknown"
-    monkeypatch.setattr(R.questionary, "select", _Ask(choice))
-    R._edit_size(ls, None)
-    assert ls.gpu_shards == SHARDS_PER_GPU and ls.cpus == 16 and ls.mem_gb == 60
+    R._edit_pods(ls, stats)
+
+    want_cpus, want_mem, want_shards = resources_for(n, stats)
+    assert len(offered["choices"]) == n + 2   # n pod rows + Separator + Back
+    assert ls.gpu_shards == want_shards == n
+    assert ls.cpus == want_cpus and ls.mem_gb == want_mem
 
 
 # ── Fix round 1: review findings ─────────────────────────────────────────────
@@ -297,16 +309,18 @@ def _live_stats(total_mb=32768, used_mb=4096, free=3):
 def test_hub_vram_share_scales_with_the_requested_shards():
     """I1: the line used to read "about 8 GB of 32" for every job, so a
     Whole-GPU launch was told it owned the card and got an eighth of it in the
-    same panel. The number now comes from the live reading and the shard count."""
-    from iitgpu.launchspec import apply_size, default_spec
+    same panel. The number now comes from the live reading and the pod count."""
+    from iitgpu.launchspec import apply_pods, default_spec
+    from iitgpu.pods import pod_count
 
-    one = default_spec("batch")            # Standard == 1 shard
-    out_one = _plain(render_hub(one, _live_stats()))
+    live = _live_stats()
+    one = default_spec("batch")            # 1 pod, the default
+    out_one = _plain(render_hub(one, live))
     assert "8 GB of 32" in out_one
 
     whole = default_spec("batch")
-    apply_size(whole, "whole")
-    out_whole = _plain(render_hub(whole, _live_stats()))
+    apply_pods(whole, pod_count(live), live)
+    out_whole = _plain(render_hub(whole, live))
     assert "32 GB of 32" in out_whole
     # The contradiction the finding was about: whole-GPU must not repeat the
     # one-shard sentence.
@@ -367,13 +381,13 @@ def test_hub_hides_every_no_op_row_for_a_shell(monkeypatch):
     for gone in ("Change environment", "Change data / model", "Advanced…",
                  "Change script", "Change args"):
         assert gone not in seen["choices"], gone
-    assert seen["choices"] == ["Launch", "Change size", "Change time limit",
+    assert seen["choices"] == ["Launch", "Change pods", "Change time limit",
                                "Save as template", BACK]
 
     panel = _plain(render_hub(default_spec("shell"), None))
     for gone in ("Environment", "Data / model", "Advanced", "Args", "Script"):
         assert gone not in panel, gone
-    assert "Size" in panel and "Time limit" in panel
+    assert "Pods" in panel and "Time limit" in panel
 
 
 def test_hub_hides_data_model_for_a_session_but_keeps_env_and_packages(monkeypatch):

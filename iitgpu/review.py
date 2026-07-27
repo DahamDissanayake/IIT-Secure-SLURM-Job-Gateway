@@ -7,9 +7,10 @@ import questionary
 from rich.markup import escape
 from rich.panel import Panel
 
-from iitgpu.jobs import SHARDS_PER_GPU, gpu_share_note
-from iitgpu.launchspec import (SIZES, LaunchSpec, apply_size, availability_line,
-                               size_availability, size_label)
+from iitgpu.jobs import gpu_share_note
+from iitgpu.launchspec import (LaunchSpec, apply_pods, availability_line,
+                               pod_availability, pod_label)
+from iitgpu.pods import estimated_vram_gb, pod_count
 from iitgpu.slurm import get_node_stats
 from iitgpu.ui import console, info, select_menu, warn
 
@@ -60,20 +61,12 @@ def _noop_fields(ls: LaunchSpec) -> set[str]:
 
 
 def _vram_note(ls: LaunchSpec, stats) -> str:
-    """The VRAM caveat, with the actual per-shard share when the node reports it.
-
-    This used to hardcode "about 8 GB of 32" no matter how much of the card the
-    job had reserved, so a Whole-GPU job was told it owned the card and got an
-    eighth of it in the same panel. The arithmetic mirrors `_vram_check()` in
-    wizard.py, which has always done this correctly at submit time.
-    """
+    """The VRAM caveat, with the actual per-pod share when the node reports it."""
     base = "GPU memory is shared between jobs and not enforced"
-    total_mb = getattr(stats, "gpu_mem_total_mb", 0) if stats else 0
-    if not (stats and getattr(stats, "live_stats", False) and total_mb):
+    share_gb = estimated_vram_gb(ls.gpu_shards, stats)
+    if share_gb is None:
         return f"{base}."
-    total_gb = total_mb / 1024
-    shards = max(1, min(ls.gpu_shards, SHARDS_PER_GPU))
-    share_gb = total_gb * shards / SHARDS_PER_GPU
+    total_gb = stats.gpu_mem_total_mb / 1024
     return (f"{base} — your fair share is about "
             f"{share_gb:.0f} GB of {total_gb:.0f}.")
 
@@ -91,7 +84,7 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
                      if ls.script else "(not set)"))
     rows += [
         ("Environment", escape(_env_display(ls))),
-        ("Size", f"{size_label(ls)}   [dim]{size_availability(ls.gpu_shards, stats)}[/]"),
+        ("Pods", f"{pod_label(ls, stats)}   [dim]{pod_availability(ls.gpu_shards, stats)}[/]"),
         ("Time limit", _fmt_time(ls.time_limit)),
         ("Data / model", escape(ls.data_path or ls.model_path or "(none)")),
     ]
@@ -104,23 +97,26 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
     hidden = _noop_fields(ls)
     rows = [(k, v) for k, v in rows if k not in hidden]
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
-    share = gpu_share_note(ls.gpu_shards)
+    share = gpu_share_note(ls.gpu_shards, pod_count(stats))
     body += f"\n\n  [dim]{share}[/]\n  [dim]{_vram_note(ls, stats)}[/]"
     return Panel(body, title=f"[bold] Ready to launch ─ {availability_line(stats)} [/bold]",
                  border_style="cyan")
 
 
-def _edit_size(ls: LaunchSpec, stats) -> None:
+def _edit_pods(ls: LaunchSpec, stats) -> None:
+    n = pod_count(stats)
     choices, mapping = [], {}
-    for key in ("standard", "small", "whole"):
-        s = SIZES[key]
-        probe = LaunchSpec(intent=ls.intent, gpu_shards=s.gpu_shards,
-                           cpus=s.cpus, mem_gb=s.mem_gb)
-        label = f"{size_label(probe)}  {size_availability(s.gpu_shards, stats)}"
-        choices.append(label); mapping[label] = key
-    sel = select_menu("Size:", choices)
+    for k in range(1, n + 1):
+        probe = LaunchSpec(intent=ls.intent)
+        apply_pods(probe, k, stats)
+        vram = estimated_vram_gb(k, stats)
+        vram_txt = f", ~{vram:.0f}GB VRAM" if vram is not None else ""
+        label = (f"{pod_label(probe, stats)}{vram_txt}  "
+                 f"{pod_availability(k, stats)}")
+        choices.append(label); mapping[label] = k
+    sel = select_menu("Pods:", choices)
     if sel:
-        apply_size(ls, mapping[sel])
+        apply_pods(ls, mapping[sel], stats)
 
 
 def _edit_time(ls: LaunchSpec) -> None:
@@ -305,7 +301,7 @@ def _edit_advanced(ls: LaunchSpec, preview=None) -> None:
                                 border_style="cyan"))
 
 
-_HUB_CHOICES = ["Launch", "Change script", "Change size", "Change time limit",
+_HUB_CHOICES = ["Launch", "Change script", "Change pods", "Change time limit",
                 "Change environment", "Change data / model", "Change args",
                 "Advanced…", "Save as template"]
 
@@ -349,8 +345,8 @@ def run_hub(ls: LaunchSpec, cfg, user: str, *, browse_script, browse_data,
             picked = browse_script()
             if picked:
                 ls.script = picked
-        elif sel == "Change size":
-            _edit_size(ls, stats)
+        elif sel == "Change pods":
+            _edit_pods(ls, stats)
         elif sel == "Change time limit":
             _edit_time(ls)
         elif sel == "Change environment":
