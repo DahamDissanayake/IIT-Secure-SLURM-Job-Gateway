@@ -100,34 +100,59 @@ def test_write_sbatch_creates_file(tmp_path):
     assert Path(path).read_text().startswith("#!/bin/bash")
 
 
-from iitgpu.jobs import TaskDefaults, resource_defaults, TASK_DEFAULTS
+from iitgpu.jobs import TaskDefaults, resource_defaults, TASK_POD_DEFAULTS
+from iitgpu.slurm import NodeStats
 
 
-def test_resource_defaults_train():
-    d = resource_defaults("train")
+def _stats():
+    return NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                     mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                     shard_total=4, shard_alloc=0)
+
+
+def test_resource_defaults_train_takes_the_whole_node():
+    """Unified pod model: training defaults to ALL pods, which on today's live
+    cluster means the whole node -- not the old arbitrary half-the-CPUs value."""
+    d = resource_defaults("train", _stats())
     assert d.gpu_shards == 4
-    assert d.cpus == 16
-    assert d.mem_gb == 60
+    assert d.cpus == 32
+    assert d.mem_gb == 56
     assert d.time_limit == ""
 
 
 def test_resource_defaults_inference():
-    d = resource_defaults("inference")
+    d = resource_defaults("inference", _stats())
     assert d.cpus == 8
     assert d.mem_gb == 14
+    assert d.gpu_shards == 1
     assert d.time_limit == "04:00:00"
 
 
-def test_resource_defaults_test():
-    d = resource_defaults("test")
+def test_resource_defaults_test_is_a_fixed_smoke_allocation():
+    """'test' is a deliberately fixed tiny smoke-test job, not pod-derived."""
+    d = resource_defaults("test", _stats())
     assert d.cpus == 4
     assert d.mem_gb == 8
     assert d.time_limit == "00:30:00"
 
 
 def test_resource_defaults_unknown_falls_back_to_custom():
-    d = resource_defaults("nonexistent_task")
-    assert d == resource_defaults("custom")
+    d = resource_defaults("nonexistent_task", _stats())
+    assert d == resource_defaults("custom", _stats())
+
+
+def test_resource_defaults_without_stats_degrades_gracefully(monkeypatch):
+    """No live stats available (e.g. scontrol unreachable) -- must not crash,
+    falls back to a single-pod-sized allocation."""
+    import iitgpu.jobs as jobs
+    monkeypatch.setattr(jobs, "_live_stats", lambda: None)
+    d = resource_defaults("notebook")
+    assert d.gpu_shards == 1 and d.cpus >= 1 and d.mem_gb >= 1
+
+
+def test_task_pod_defaults_covers_every_task_type():
+    for name in ("train", "finetune", "custom", "inference", "notebook", "interactive"):
+        assert name in TASK_POD_DEFAULTS
 
 
 def test_render_sbatch_empty_time_limit_omits_time_directive(tmp_path):

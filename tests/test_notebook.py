@@ -6,14 +6,18 @@ import pytest
 
 # ── Task defaults ─────────────────────────────────────────────────────────────
 
-def test_notebook_in_task_defaults():
-    from iitgpu.jobs import TASK_DEFAULTS
-    assert "notebook" in TASK_DEFAULTS
+def test_notebook_in_task_pod_defaults():
+    from iitgpu.jobs import TASK_POD_DEFAULTS
+    assert "notebook" in TASK_POD_DEFAULTS
 
 
 def test_notebook_defaults_correct():
     from iitgpu.jobs import resource_defaults
-    d = resource_defaults("notebook")
+    from iitgpu.slurm import NodeStats
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+    d = resource_defaults("notebook", stats)
     assert d.gpu_shards == 1
     assert d.cpus == 8
     assert d.mem_gb == 14

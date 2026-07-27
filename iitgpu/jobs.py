@@ -18,52 +18,64 @@ def _cluster_tz():
 from pathlib import Path
 
 
-# The cluster's single GPU is split into SHARDS_PER_GPU schedulable slices
-# (gres.conf: "Name=shard Count=4 File=/dev/nvidia0"), so several jobs can run
-# on it concurrently instead of one job locking the whole card. Jobs therefore
-# request --gres=shard:N, never --gres=gpu:N — asking for a whole gpu takes the
-# device *and* all its shards, which is exactly the blocking we removed.
-# Keep this in sync with gres.conf on every node.
-SHARDS_PER_GPU = 4
-
-
 @dataclass(frozen=True)
 class TaskDefaults:
-    gpu_shards: int   # GPU slices to request; SHARDS_PER_GPU == the whole card
+    gpu_shards: int   # GPU slices (pods) to request
     cpus: int
     mem_gb: int
     time_limit: str  # "" means no time limit (SLURM INFINITE)
 
 
-# Interactive/light work takes one slice so several users fit on the card at
-# once; training-shaped work still takes the whole GPU because it wants all the
-# VRAM. Shards are a *scheduling* split, not a VRAM cap — see gpu_share_note().
-#
-# CPU and RAM must be sized to match the split, or they become the new
-# bottleneck: a one-slice job asking for 32G RAM still blocks a second one on a
-# 60G node, and the GPU sits mostly idle exactly as it did before sharding.
-# A single-slice job therefore gets about a quarter of the node.
-_SLICE_CPUS = 8    # 32 cores / 4 slices
-_SLICE_MEM_GB = 14  # ~60 GiB / 4 slices, with headroom so four really fit
+_ALL_PODS = "all"
 
-TASK_DEFAULTS: dict[str, TaskDefaults] = {
-    "train":     TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
-    "finetune":  TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
-    "inference": TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
-                              time_limit="04:00:00"),
-    "test":      TaskDefaults(gpu_shards=1, cpus=4, mem_gb=8, time_limit="00:30:00"),
-    "notebook":  TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
-                              time_limit="08:00:00"),
-    # An interactive shell mostly sits idle at a prompt — one slice, so it never
-    # parks on the whole card while someone reads their scrollback.
-    "interactive": TaskDefaults(gpu_shards=1, cpus=_SLICE_CPUS, mem_gb=_SLICE_MEM_GB,
-                                time_limit="02:00:00"),
-    "custom":    TaskDefaults(gpu_shards=SHARDS_PER_GPU, cpus=16, mem_gb=60, time_limit=""),
+# How many pods each task type requests by default. "all" means "every pod
+# currently on the node" -- on today's cluster (4 pods) that's the whole
+# node; if an admin resizes pod count later (Plan B), this keeps working with
+# no change here, because it's resolved against live NodeStats at call time,
+# never a stored number.
+TASK_POD_DEFAULTS: dict[str, int | str] = {
+    "train":       _ALL_PODS,
+    "finetune":    _ALL_PODS,
+    "custom":      _ALL_PODS,
+    "inference":   1,
+    "notebook":    1,
+    "interactive": 1,
 }
 
+_DEFAULT_TIME_LIMIT: dict[str, str] = {
+    "train": "", "finetune": "", "custom": "",
+    "inference": "04:00:00", "notebook": "08:00:00", "interactive": "02:00:00",
+}
 
-def resource_defaults(task_type: str) -> TaskDefaults:
-    return TASK_DEFAULTS.get(task_type, TASK_DEFAULTS["custom"])
+# "test" is a fixed tiny smoke-test allocation, deliberately NOT tied to pod
+# count -- it's a connectivity check, not real work, and always the same size
+# regardless of how the cluster is currently split.
+_TEST_DEFAULTS = TaskDefaults(gpu_shards=1, cpus=4, mem_gb=8, time_limit="00:30:00")
+
+
+def _live_stats():
+    try:
+        from iitgpu.slurm import get_node_stats
+        return get_node_stats()
+    except Exception:
+        return None
+
+
+def resource_defaults(task_type: str, stats=None) -> TaskDefaults:
+    """Default sizing for a task type, derived live from the cluster's current
+    pod split. Falls back to a live scontrol read when *stats* isn't given
+    (most call sites don't already have a NodeStats handy)."""
+    if task_type == "test":
+        return _TEST_DEFAULTS
+    if stats is None:
+        stats = _live_stats()
+    from iitgpu.pods import pod_count, resources_for
+    n = pod_count(stats)
+    want = TASK_POD_DEFAULTS.get(task_type, _ALL_PODS)
+    k = n if want == _ALL_PODS else min(int(want), n)
+    cpus, mem_gb, gpu_shards = resources_for(k, stats)
+    return TaskDefaults(gpu_shards=gpu_shards, cpus=cpus, mem_gb=mem_gb,
+                        time_limit=_DEFAULT_TIME_LIMIT.get(task_type, ""))
 
 
 def gres_directive(gpu_shards: int) -> str:
@@ -71,14 +83,18 @@ def gres_directive(gpu_shards: int) -> str:
     return f"shard:{gpu_shards}" if gpu_shards > 0 else ""
 
 
-def gpu_share_note(gpu_shards: int) -> str:
-    """Plain-language description of how much of the GPU a request reserves."""
+def gpu_share_note(gpu_shards: int, total_shards: int) -> str:
+    """Plain-language description of how much of the GPU a request reserves.
+
+    Pure -- total_shards must be passed in by the caller (e.g.
+    `pods.pod_count(get_node_stats())`), never fetched internally, so this
+    stays a fast, testable, no-I/O function."""
     if gpu_shards <= 0:
         return "no GPU (CPU-only)"
-    if gpu_shards >= SHARDS_PER_GPU:
+    if gpu_shards >= total_shards:
         return "the whole GPU (no one else can use it)"
-    return (f"{gpu_shards}/{SHARDS_PER_GPU} of the GPU "
-            f"({SHARDS_PER_GPU - gpu_shards}/{SHARDS_PER_GPU} left for others)")
+    return (f"{gpu_shards}/{total_shards} of the GPU "
+            f"({total_shards - gpu_shards}/{total_shards} left for others)")
 
 
 @dataclass

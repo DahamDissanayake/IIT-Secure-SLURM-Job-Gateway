@@ -2,14 +2,27 @@
 
 Before sharding a job asked for --gres=gpu:1 and took the whole card, so a
 second GPU job (e.g. a colleague's JupyterLab) could not start at all. Jobs now
-request slices (--gres=shard:N) instead.
+request slices (--gres=shard:N) instead. Pod count (how many slices the card
+is split into) is read live from NodeStats, not a hardcoded constant -- these
+tests pin it at today's real cluster value (4) via an explicit stats fixture.
 """
 import pytest
 
 from iitgpu.jobs import (
-    SHARDS_PER_GPU, JobSpec, TASK_DEFAULTS, gpu_share_note, gres_directive,
+    JobSpec, TASK_POD_DEFAULTS, gpu_share_note, gres_directive,
     render_sbatch, render_notebook_sbatch, resource_defaults,
 )
+from iitgpu.pods import pod_count
+from iitgpu.slurm import NodeStats
+
+NODE_CPUS = 32
+NODE_MEM_GB = 60      # RealMemory=62000 MB
+
+
+def _stats(shard_total=4):
+    return NodeStats(state="MIXED", cpu_load=0.0, cpu_total=NODE_CPUS, cpu_alloc=0,
+                     mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                     shard_total=shard_total, shard_alloc=0)
 
 
 def _spec(**kw):
@@ -25,7 +38,7 @@ def _spec(**kw):
 
 def test_gres_directive_requests_shards_not_whole_gpu():
     assert gres_directive(1) == "shard:1"
-    assert gres_directive(SHARDS_PER_GPU) == f"shard:{SHARDS_PER_GPU}"
+    assert gres_directive(4) == "shard:4"
 
 
 def test_gres_directive_empty_when_no_gpu_wanted():
@@ -44,9 +57,10 @@ def test_rendered_sbatch_never_requests_a_whole_gpu(tmp_path):
 
 def test_two_notebooks_each_take_one_slice(tmp_path):
     """Two JupyterLab jobs must fit on the card at once."""
-    nb = resource_defaults("notebook")
+    stats = _stats()
+    nb = resource_defaults("notebook", stats)
     assert nb.gpu_shards == 1
-    assert nb.gpu_shards * 2 <= SHARDS_PER_GPU, "two notebooks must fit together"
+    assert nb.gpu_shards * 2 <= pod_count(stats), "two notebooks must fit together"
 
 
 def test_notebook_sbatch_requests_a_slice(tmp_path):
@@ -66,26 +80,30 @@ def test_cpu_only_job_omits_gres_entirely(tmp_path):
 
 @pytest.mark.parametrize("task", ["notebook", "interactive", "test", "inference"])
 def test_light_tasks_leave_room_for_others(task):
-    assert resource_defaults(task).gpu_shards < SHARDS_PER_GPU
+    stats = _stats()
+    assert resource_defaults(task, stats).gpu_shards < pod_count(stats)
 
 
 @pytest.mark.parametrize("task", ["train", "finetune"])
 def test_training_still_gets_the_whole_card(task):
-    assert resource_defaults(task).gpu_shards == SHARDS_PER_GPU
+    stats = _stats()
+    assert resource_defaults(task, stats).gpu_shards == pod_count(stats)
 
 
 def test_no_task_default_over_subscribes_the_gpu():
-    for name, d in TASK_DEFAULTS.items():
-        assert 0 <= d.gpu_shards <= SHARDS_PER_GPU, name
+    stats = _stats()
+    for name in TASK_POD_DEFAULTS:
+        d = resource_defaults(name, stats)
+        assert 0 <= d.gpu_shards <= pod_count(stats), name
 
 
 # ── User-facing wording ───────────────────────────────────────────────────────
 
 def test_gpu_share_note_explains_what_is_left():
-    assert "no GPU" in gpu_share_note(0)
-    assert "whole GPU" in gpu_share_note(SHARDS_PER_GPU)
-    partial = gpu_share_note(1)
-    assert f"1/{SHARDS_PER_GPU}" in partial and "left for others" in partial
+    assert "no GPU" in gpu_share_note(0, 4)
+    assert "whole GPU" in gpu_share_note(4, 4)
+    partial = gpu_share_note(1, 4)
+    assert "1/4" in partial and "left for others" in partial
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -121,14 +139,11 @@ def test_shard_request_beyond_capacity_is_rejected(monkeypatch):
 # notebook queues on "Resources" with the GPU almost idle. This is the bug that
 # survived the first sharding attempt, so it is pinned here.
 
-NODE_CPUS = 32
-NODE_MEM_GB = 60      # RealMemory=62000 MB
-
-
 @pytest.mark.parametrize("task", ["notebook", "interactive", "inference"])
 def test_a_full_cards_worth_of_slice_jobs_fits_on_the_node(task):
-    d = resource_defaults(task)
-    concurrent = SHARDS_PER_GPU // d.gpu_shards
+    stats = _stats()
+    d = resource_defaults(task, stats)
+    concurrent = pod_count(stats) // d.gpu_shards
     assert d.cpus * concurrent <= NODE_CPUS, (
         f"{concurrent}x {task} needs {d.cpus * concurrent} CPUs, node has {NODE_CPUS}")
     assert d.mem_gb * concurrent <= NODE_MEM_GB, (
@@ -138,15 +153,17 @@ def test_a_full_cards_worth_of_slice_jobs_fits_on_the_node(task):
 
 def test_two_notebooks_fit_side_by_side():
     """The originally reported failure: a second JupyterLab could not start."""
-    d = resource_defaults("notebook")
-    assert d.gpu_shards * 2 <= SHARDS_PER_GPU
+    stats = _stats()
+    d = resource_defaults("notebook", stats)
+    assert d.gpu_shards * 2 <= pod_count(stats)
     assert d.cpus * 2 <= NODE_CPUS
     assert d.mem_gb * 2 <= NODE_MEM_GB
 
 
 def test_whole_card_tasks_still_fit_on_the_node():
+    stats = _stats()
     for task in ("train", "finetune", "custom"):
-        d = resource_defaults(task)
+        d = resource_defaults(task, stats)
         assert d.cpus <= NODE_CPUS and d.mem_gb <= NODE_MEM_GB, task
 
 
