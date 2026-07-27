@@ -30,16 +30,17 @@ Secure terminal gateway for SLURM GPU job submission at IIT. Users SSH in and la
    - [5. Admin](#5-admin-admins-only)
 5. [Linux machine setup (before installation)](#linux-machine-setup-before-installation)
 6. [Installation](#installation)
-7. [Adding and removing users](#adding-and-removing-users)
-8. [Configuration reference](#configuration-reference)
-9. [Audit logging](#audit-logging)
-10. [Mail / notifications](#mail--notifications)
-11. [GPU sharing model](#gpu-sharing-model)
-12. [Demo mode (no SLURM required)](#demo-mode-no-slurm-required)
-13. [Running the test suite](#running-the-test-suite)
-14. [Project layout](#project-layout)
-15. [Security model / bypass-test checklist](#security-model--bypass-test-checklist)
-16. [Day-2 operations (maintainers)](#day-2-operations-maintainers)
+7. [Installing via an AI coding agent (igm-installer skill)](#installing-via-an-ai-coding-agent-igm-installer-skill)
+8. [Adding and removing users](#adding-and-removing-users)
+9. [Configuration reference](#configuration-reference)
+10. [Audit logging](#audit-logging)
+11. [Mail / notifications](#mail--notifications)
+12. [GPU sharing model](#gpu-sharing-model)
+13. [Demo mode (no SLURM required)](#demo-mode-no-slurm-required)
+14. [Running the test suite](#running-the-test-suite)
+15. [Project layout](#project-layout)
+16. [Security model / bypass-test checklist](#security-model--bypass-test-checklist)
+17. [Day-2 operations (maintainers)](#day-2-operations-maintainers)
 
 ---
 
@@ -500,6 +501,36 @@ NodeName=<node> ... Gres=gpu:1,shard:4
 Name=shard Count=4 File=/dev/nvidia0
 ```
 Restart `slurmctld` (login node) then `slurmd` (compute node) — in that order; a `SelectType` change is not hot-reloadable via `scontrol reconfigure`. See [GPU sharing model](#gpu-sharing-model) for how the app side maps to this.
+
+---
+
+## Installing via an AI coding agent (igm-installer skill)
+
+This repo ships an `igm-installer` skill that drives the install above as a
+**guided, checkpointed** conversation instead of a blind one-shot script: it
+runs the preflight checks from [Linux machine setup](#linux-machine-setup-before-installation),
+interviews you for the site-specific values `deploy/site.env` needs, then
+walks through `install.sh`, the admin sudoers file, GPU-host SSH, service
+verification, first-admin provisioning, and optional GPU sharing — asking
+for explicit confirmation before every root/sudo/sshd/sudoers/systemd action.
+It never runs the whole install unattended.
+
+### Claude Code
+
+```bash
+/plugin marketplace add DahamDissanayake/IIT-Secure-SLURM-Job-Gateway
+/plugin install igm-installer@iit-gpu-manager
+/igm-installer
+```
+
+Then answer its questions and approve each checkpoint as it comes up.
+
+### Any other AI coding agent
+
+Open [`skills/igm-installer/AGENT-INSTRUCTIONS.md`](skills/igm-installer/AGENT-INSTRUCTIONS.md)
+and paste it into your assistant of choice (Cursor, Copilot Workspace,
+Windsurf, etc.) with this repo open — it describes the same guided,
+checkpointed process in agent-agnostic terms.
 
 ---
 
