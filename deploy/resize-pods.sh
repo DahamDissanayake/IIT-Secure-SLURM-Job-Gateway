@@ -62,6 +62,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
+echo "== restarting slurmctld (login node)"
+sudo systemctl restart slurmctld
+
 echo "== syncing gres.conf to the GPU host and restarting slurmd"
 scp "$CONF_DIR/gres.conf" "$CONF_DIR/slurm.conf" \
     "${GPU_HOST_SSH}:/tmp/iit-resize-$TS/" 2>/dev/null || {
@@ -71,9 +74,12 @@ scp "$CONF_DIR/gres.conf" "$CONF_DIR/slurm.conf" \
 }
 ssh "$GPU_HOST_SSH" "sudo cp /tmp/iit-resize-$TS/gres.conf /tmp/iit-resize-$TS/slurm.conf /etc/slurm/ && sudo systemctl restart slurmd"
 
-echo "== restarting slurmctld (login node)"
-sudo systemctl restart slurmctld
-
+# slurmctld restarted first above, then slurmd: when the old slurmd
+# re-registers with the freshly-restarted controller it can briefly report
+# the old shard count, putting the node into an expected transient DRAIN.
+# This RESUME clears that -- restarting in the other order (slurmd first)
+# skips past this safety net and was the root cause of a prior production
+# incident on this cluster.
 echo "== resuming node (a GRES change reliably drains it)"
 sudo scontrol update NodeName="$NODE_NAME" State=RESUME
 
@@ -83,9 +89,9 @@ if [ "$reported" != "shard:$NEW_N" ]; then
     echo "ERROR: GPU host reports '$reported', expected 'shard:$NEW_N' -- rolling back" >&2
     cp "$CONF_DIR/gres.conf.bak.$TS" "$CONF_DIR/gres.conf"
     cp "$CONF_DIR/slurm.conf.bak.$TS" "$CONF_DIR/slurm.conf"
+    sudo systemctl restart slurmctld
     scp "$CONF_DIR/gres.conf" "$CONF_DIR/slurm.conf" "${GPU_HOST_SSH}:/tmp/iit-resize-rollback-$TS/" 2>/dev/null || true
     ssh "$GPU_HOST_SSH" "sudo cp /tmp/iit-resize-rollback-$TS/gres.conf /tmp/iit-resize-rollback-$TS/slurm.conf /etc/slurm/ 2>/dev/null; sudo systemctl restart slurmd" || true
-    sudo systemctl restart slurmctld
     sudo scontrol update NodeName="$NODE_NAME" State=RESUME
     echo "ERROR: rollback performed -- resize did NOT apply" >&2
     exit 1
