@@ -472,7 +472,12 @@ def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
     zero. Otherwise shells out to resize-pods.sh, which does the actual
     cross-node config rewrite + restart + verify."""
     rc, out, _ = _run(["squeue", "--noheader"])
-    if rc == 0 and out.strip():
+    if rc != 0:
+        # Fail CLOSED: a squeue we could not read is NOT proof of an empty
+        # queue, and resizing under live jobs is the one thing this gate exists
+        # to prevent.
+        return False, "Cannot read the job queue (squeue failed) -- refusing to resize"
+    if out.strip():
         n_jobs = len(out.strip().splitlines())
         return False, f"{n_jobs} job(s) still active cluster-wide -- refusing to resize"
 
@@ -485,8 +490,15 @@ def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
     if not fits:
         return False, msg
 
+    # -u slurmadmin is REQUIRED and must stay in lockstep with the grant in
+    # deploy/sudoers-gateway-admin:
+    #     %gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/iit-gpu/deploy/resize-pods.sh *
+    # Without -u, sudo targets root, which that line does not authorise (and
+    # the script's own `id -un` guard would refuse anyway). Same shape as the
+    # "log in as user" action's `sudo -H -u <target>` below.
     rc, out, err = _run(
-        ["sudo", "-n", "/opt/iit-gpu/deploy/resize-pods.sh", str(new_n)], timeout=120)
+        ["sudo", "-n", "-u", "slurmadmin",
+         "/opt/iit-gpu/deploy/resize-pods.sh", str(new_n)], timeout=120)
     auditclient.log("admin_pod_resize", detail=f"new_n={new_n} rc={rc}")
     if rc != 0:
         return False, (err.strip() or out.strip() or "resize failed")
@@ -496,10 +508,11 @@ def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
 def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
     import questionary
     from rich.table import Table
-    from iitgpu.pods import pod_count, pod_resources
+    from iitgpu.pods import fits_new_pod_count, pod_count, pod_count_known, pod_resources
     from iitgpu.ui import console, ok, err, screen
 
     stats = get_node_stats(node)
+    known = pod_count_known(stats)
     n = pod_count(stats)
     size = pod_resources(stats)
     cells = pod_occupancy(node, n)
@@ -516,17 +529,41 @@ def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
             label = "" if cell["id"] in seen else f"{cell['id']} {cell['user']} ({cell['name']})"
             seen.add(cell["id"])
             t.add_row(str(i), "[green]in use[/]", label)
-    screen("Pods", status=f"{n} pod(s) configured — {size.cpus} CPU / "
-                          f"{size.mem_gb} GB RAM each")
+    # pod_count()/pod_resources() floor to 1/PodSize(1,1) when live stats are
+    # unreadable -- a safe number for arithmetic, but presenting it to an admin
+    # as fact would be a lie. Gate on pod_count_known() like every other
+    # pods.py consumer (validate.py, launchspec.py, review.py, wizard.py).
+    if known:
+        status = (f"{n} pod(s) configured — {size.cpus} CPU / "
+                  f"{size.mem_gb} GB RAM each")
+    else:
+        status = "pod count unknown — cluster stats unavailable"
+    screen("Pods", status=status)
     console.print(t)
 
     if questionary.confirm("Resize pod count?", default=False, style=style).ask():
-        val = questionary.text(f"New pod count (currently {n}):", style=style).ask()
+        current = str(n) if known else "unknown"
+        val = questionary.text(f"New pod count (currently {current}):", style=style).ask()
         try:
             new_n = int((val or "").strip())
         except ValueError:
             err("Enter a whole number."); return
-        good, msg = resize_pod_count(new_n)
+
+        # Spec: the confirm dialog shows the REAL derived per-pod CPU/mem for
+        # the candidate N before anything is committed. fits_new_pod_count()
+        # already returns exactly that sentence; resize_pod_count() re-runs the
+        # same check atomically at execution time (cheap, and the queue/stats
+        # can change between the preview and the commit).
+        if stats is None:
+            err("Cannot read live node stats -- refusing to resize blind."); return
+        fits, preview = fits_new_pod_count(new_n, stats)
+        if not fits:
+            err(preview); return
+        if not questionary.confirm(
+                f"{preview} Apply this resize?", default=False, style=style).ask():
+            return
+
+        good, msg = resize_pod_count(new_n, node=node)
         (ok if good else err)(msg)
 
 

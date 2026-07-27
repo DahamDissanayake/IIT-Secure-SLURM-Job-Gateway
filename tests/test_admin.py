@@ -151,9 +151,12 @@ def test_resize_pod_count_runs_the_script_when_clear(monkeypatch):
                       mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=4, shard_alloc=0)
 
+    seen = []
+
     def fake_run(cmd, timeout=15, stdin_data=None):
         if cmd[0] == "squeue":
             return 0, "", ""
+        seen.append(cmd)
         assert cmd[-1] == "5"
         assert "resize-pods.sh" in cmd[-2]
         return 0, "resize applied: pod count is now 5", ""
@@ -163,6 +166,139 @@ def test_resize_pod_count_runs_the_script_when_clear(monkeypatch):
         ok, msg = admin.resize_pod_count(5)
     assert ok
     assert "5" in msg
+    # The runas MUST be slurmadmin: sudo with no -u targets root, which the
+    # sudoers grant does not authorise (and the script's own id -un guard
+    # would refuse anyway).
+    assert seen[0][:4] == ["sudo", "-n", "-u", "slurmadmin"]
+
+
+def test_resize_sudo_runas_matches_the_sudoers_grant():
+    """Couples the sudo invocation to deploy/sudoers-gateway-admin so the two
+    cannot silently drift apart again: the ALL=(<runas>) in the grant for
+    resize-pods.sh must be the same account admin.py passes to `sudo -u`."""
+    import re
+    from pathlib import Path
+    from iitgpu.slurm import NodeStats
+    sudoers = (Path(__file__).resolve().parents[1]
+               / "deploy" / "sudoers-gateway-admin").read_text()
+    grant = [ln for ln in sudoers.splitlines() if "resize-pods.sh" in ln]
+    assert len(grant) == 1, grant
+    m = re.search(r"ALL=\(([^)]+)\)", grant[0])
+    assert m, grant[0]
+    runas = m.group(1)
+    script_path = grant[0].split("NOPASSWD:")[1].strip().rstrip(" *")
+
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+    seen = []
+
+    def fake_run(cmd, timeout=15, stdin_data=None):
+        if cmd[0] == "squeue":
+            return 0, "", ""
+        seen.append(cmd)
+        return 0, "ok", ""
+
+    with patch("iitgpu.admin._run", side_effect=fake_run), \
+         patch("iitgpu.admin.get_node_stats", return_value=stats):
+        admin.resize_pod_count(5)
+
+    assert seen[0] == ["sudo", "-n", "-u", runas, script_path, "5"]
+
+
+def test_resize_pod_count_refuses_when_squeue_fails():
+    """Fail CLOSED: a squeue we could not run is not evidence of an empty
+    queue, and resizing under live jobs is what this gate exists to stop."""
+    with patch("subprocess.run", return_value=_proc(rc=1, err="squeue: error")):
+        ok, msg = admin.resize_pod_count(5)
+    assert not ok
+    assert "queue" in msg.lower()
+
+
+def test_resize_pod_count_refuses_when_stats_unreadable():
+    """No live node stats means no way to check the candidate N would leave a
+    usable per-pod size -- refuse rather than resize blind."""
+    with patch("subprocess.run", return_value=_proc(out="")), \
+         patch("iitgpu.admin.get_node_stats", return_value=None):
+        ok, msg = admin.resize_pod_count(5)
+    assert not ok
+    assert "blind" in msg.lower() or "stats" in msg.lower()
+
+
+# ── Pods screen (_pods_menu) ────────────────────────────────────────────────
+
+def _stats(shard_total=4):
+    from iitgpu.slurm import NodeStats
+    return NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                     mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                     shard_total=shard_total, shard_alloc=0)
+
+
+def _answer(value):
+    a = MagicMock(); a.ask.return_value = value
+    return a
+
+
+def test_pods_menu_reports_unknown_when_stats_unavailable(capsys):
+    """pod_count()/pod_resources() floor to 1 / 1 CPU / 1 GB when live stats
+    are unreadable. Presenting that to an admin as fact is a lie -- every other
+    pods.py consumer gates on pod_count_known() and so must this one."""
+    with patch("iitgpu.admin.get_node_stats", return_value=None), \
+         patch("iitgpu.admin.pod_occupancy", return_value=[None]), \
+         patch("questionary.confirm", return_value=_answer(False)):
+        admin._pods_menu(None)
+    out = capsys.readouterr().out
+    assert "unknown" in out.lower()
+    assert "1 pod(s) configured" not in out
+
+
+def test_pods_menu_confirms_with_the_derived_sizing_before_resizing():
+    """Spec: the confirm dialog shows the REAL derived per-pod CPU/mem for the
+    candidate N before anything is committed."""
+    prompts = []
+
+    def fake_confirm(msg, **kw):
+        prompts.append(msg)
+        return _answer(True)
+
+    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
+         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+         patch("questionary.confirm", side_effect=fake_confirm), \
+         patch("questionary.text", return_value=_answer("5")), \
+         patch("iitgpu.admin.resize_pod_count",
+               return_value=(True, "done")) as rz:
+        admin._pods_menu(None, node="iit-MS-7E06")
+
+    # 5 pods out of 32 CPUs / (62000MB//1024 - 2 headroom) = 6 CPU / 11 GB
+    assert any("6 CPU" in p and "11 GB" in p for p in prompts), prompts
+    rz.assert_called_once()
+    assert rz.call_args.args[0] == 5
+    # M2: the screen's own node must be forwarded, not silently defaulted
+    assert rz.call_args.kwargs.get("node") == "iit-MS-7E06"
+
+
+def test_pods_menu_declining_the_sizing_confirm_does_not_resize():
+    answers = iter([True, False])  # "Resize?" yes, "Apply this resize?" no
+
+    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
+         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+         patch("questionary.confirm",
+               side_effect=lambda *a, **k: _answer(next(answers))), \
+         patch("questionary.text", return_value=_answer("5")), \
+         patch("iitgpu.admin.resize_pod_count") as rz:
+        admin._pods_menu(None)
+    rz.assert_not_called()
+
+
+def test_pods_menu_rejects_a_degenerate_n_before_confirming(capsys):
+    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
+         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+         patch("questionary.confirm", return_value=_answer(True)), \
+         patch("questionary.text", return_value=_answer("40")), \
+         patch("iitgpu.admin.resize_pod_count") as rz:
+        admin._pods_menu(None)
+    rz.assert_not_called()
+    assert "0 CPU" in capsys.readouterr().out
 
 
 def test_resume_node_uses_sudo_n():
