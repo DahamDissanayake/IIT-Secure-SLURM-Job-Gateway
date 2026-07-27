@@ -352,13 +352,17 @@ def list_qos() -> list[dict]:
         max_wall = parts[1].strip() or "unlimited"
         tres = parts[2].strip()
         max_gpu = "unlimited"
+        max_pods = "unlimited"
         for item in tres.split(","):
             if item.startswith("gres/gpu="):
                 max_gpu = item.split("=", 2)[-1]
+            elif item.startswith("gres/shard="):
+                max_pods = item.split("=", 2)[-1]
         rows.append({
             "name": name,
             "max_wall": max_wall,
             "max_gpu": max_gpu,
+            "max_pods": max_pods,
             "priority": parts[3].strip() or "0",
         })
     return rows
@@ -372,13 +376,45 @@ def set_qos_maxwall(qos_name: str, max_wall: str) -> tuple[bool, str]:
     return (rc == 0), (out.strip() or "updated") if rc == 0 else (err.strip() or "failed")
 
 
-def set_qos_maxgpu(qos_name: str, max_gpu: int | None) -> tuple[bool, str]:
-    tres = f"gres/gpu={max_gpu}" if max_gpu is not None else ""
+def set_qos_merge_tres(qos_name: str, **tres_updates) -> tuple[bool, str]:
+    """Modify one or more components of MaxTRESPerUser without clobbering the
+    others. A value of None clears that component; a positive int sets it.
+
+    Fixes a latent bug: the old set_qos_maxgpu() overwrote the WHOLE
+    MaxTRESPerUser string, so setting the GPU cap silently dropped any
+    existing shard (pod) cap, and vice versa."""
+    rc, out, err = _run(["sacctmgr", "-n", "--parsable2", "show", "qos",
+                        qos_name, "format=MaxTRESPerUser"])
+    if rc != 0:
+        return False, (err.strip() or "could not read current MaxTRESPerUser")
+    parts: dict[str, str] = {}
+    first_line = out.strip().splitlines()[0] if out.strip() else ""
+    for item in first_line.split(","):
+        if "=" in item:
+            k, _, v = item.partition("=")
+            parts[k.strip()] = v.strip()
+    for key, val in tres_updates.items():
+        if val is None:
+            parts.pop(key, None)
+        else:
+            parts[key] = str(val)
+    tres = ",".join(f"{k}={v}" for k, v in parts.items())
     rc, out, err = _run(
         ["sudo", "-n", "sacctmgr", "-i", "modify", "qos", qos_name,
          "set", f"MaxTRESPerUser={tres}"], timeout=20)
-    auditclient.log("admin_qos_modify", detail=f"{qos_name}:MaxGPU={max_gpu}")
+    auditclient.log("admin_qos_modify", detail=f"{qos_name}:MaxTRESPerUser={tres!r}")
     return (rc == 0), (out.strip() or "updated") if rc == 0 else (err.strip() or "failed")
+
+
+def set_qos_maxgpu(qos_name: str, max_gpu: int | None) -> tuple[bool, str]:
+    return set_qos_merge_tres(qos_name, **{"gres/gpu": max_gpu})
+
+
+def set_qos_max_pods_per_user(qos_name: str, max_pods: int | None) -> tuple[bool, str]:
+    """Caps how many pods (GPU shards) one user can hold across their
+    concurrently running jobs on this QOS -- enforced by SLURM itself
+    (sacctmgr/slurmctld), not custom application logic."""
+    return set_qos_merge_tres(qos_name, **{"gres/shard": max_pods})
 
 
 def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
@@ -406,9 +442,11 @@ def _qos_menu(style) -> None:
         t.add_column("QOS", style="magenta")
         t.add_column("Max Wall Time")
         t.add_column("Max GPUs / User")
+        t.add_column("Max Pods / User")
         t.add_column("Priority")
         for r in rows:
-            t.add_row(r["name"], r["max_wall"], str(r["max_gpu"]), r["priority"])
+            t.add_row(r["name"], r["max_wall"], str(r["max_gpu"]),
+                     str(r["max_pods"]), r["priority"])
         screen("QOS / Limits", status=t)
 
         qos_names = [r["name"] for r in rows]
@@ -419,7 +457,7 @@ def _qos_menu(style) -> None:
         current = next((r for r in rows if r["name"] == qname), {})
         field = select_menu(
             "Field to change:",
-            ["Max Wall Time", "Max GPUs per user", "Priority"])
+            ["Max Wall Time", "Max GPUs per user", "Max Pods per user", "Priority"])
         if field is None:
             continue
 
@@ -457,6 +495,29 @@ def _qos_menu(style) -> None:
                     f"[magenta]{gpu_val if gpu_val is not None else 'unlimited'}[/]?",
                     default=True, style=style).ask():
                 good, msg = set_qos_maxgpu(qname, gpu_val)
+                (ok if good else err)(msg)
+
+        elif field == "Max Pods per user":
+            info(f"  Current: [magenta]{current.get('max_pods', '?')}[/]")
+            val = questionary.text(
+                "New max pods per user (positive integer; blank = unlimited):",
+                style=style).ask()
+            if val is None:
+                continue
+            val = val.strip()
+            pods_val: int | None = None
+            if val:
+                try:
+                    pods_val = int(val)
+                    if pods_val <= 0:
+                        raise ValueError
+                except ValueError:
+                    err("Enter a positive integer or leave blank."); continue
+            if questionary.confirm(
+                    f"Set [magenta]{qname}[/] Max Pods per user to "
+                    f"[magenta]{pods_val if pods_val is not None else 'unlimited'}[/]?",
+                    default=True, style=style).ask():
+                good, msg = set_qos_max_pods_per_user(qname, pods_val)
                 (ok if good else err)(msg)
 
         elif field == "Priority":

@@ -227,7 +227,7 @@ def test_read_audit_filters_by_user():
 
 # ── QOS ───────────────────────────────────────────────────────────────────────
 
-_QOS_OUTPUT = "normal|08:00:00|gres/gpu=1|0\nlong|7-00:00:00||0\n"
+_QOS_OUTPUT = "normal|08:00:00|gres/gpu=10,gres/shard=4|0\nlong|7-00:00:00||0\n"
 
 
 def test_list_qos_parses_sacctmgr_output():
@@ -237,11 +237,13 @@ def test_list_qos_parses_sacctmgr_output():
     normal = rows[0]
     assert normal["name"] == "normal"
     assert normal["max_wall"] == "08:00:00"
-    assert normal["max_gpu"] == "1"
+    assert normal["max_gpu"] == "10"
+    assert normal["max_pods"] == "4"
     assert normal["priority"] == "0"
     long_qos = rows[1]
     assert long_qos["max_wall"] == "7-00:00:00"
     assert long_qos["max_gpu"] == "unlimited"
+    assert long_qos["max_pods"] == "unlimited"
 
 
 def test_set_qos_maxwall_calls_sacctmgr():
@@ -265,17 +267,56 @@ def test_set_qos_maxwall_empty_clears_limit():
 def test_set_qos_maxgpu_sets_tres():
     with patch("subprocess.run", return_value=_proc(out="Modified")) as r:
         ok, _ = admin.set_qos_maxgpu("normal", 2)
-    cmd = r.call_args[0][0]
-    assert "MaxTRESPerUser=gres/gpu=2" in cmd
+    write_cmd = r.call_args[0][0]
+    assert write_cmd[:3] == ["sudo", "-n", "sacctmgr"]
+    assert "MaxTRESPerUser=gres/gpu=2" in write_cmd
     assert ok
 
 
 def test_set_qos_maxgpu_none_clears_limit():
     with patch("subprocess.run", return_value=_proc(out="Modified")) as r:
         ok, _ = admin.set_qos_maxgpu("long", None)
-    cmd = r.call_args[0][0]
-    assert "MaxTRESPerUser=" in cmd
+    write_cmd = r.call_args[0][0]
+    assert "MaxTRESPerUser=" in write_cmd
     assert ok
+
+
+def test_set_qos_maxgpu_preserves_existing_shard_cap():
+    """Regression test for the clobber bug: setting the GPU cap must not wipe
+    an existing shard (pod) cap already present in MaxTRESPerUser."""
+    read_proc = _proc(out="gres/gpu=10,gres/shard=4\n")
+    write_proc = _proc(out="Modified")
+    with patch("subprocess.run", side_effect=[read_proc, write_proc]) as r:
+        ok, _ = admin.set_qos_maxgpu("normal", 2)
+    assert ok
+    write_cmd = r.call_args_list[-1][0][0]
+    tres_arg = next(a for a in write_cmd if a.startswith("MaxTRESPerUser="))
+    assert "gres/gpu=2" in tres_arg
+    assert "gres/shard=4" in tres_arg
+
+
+def test_set_qos_max_pods_per_user_preserves_existing_gpu_cap():
+    read_proc = _proc(out="gres/gpu=10,gres/shard=4\n")
+    write_proc = _proc(out="Modified")
+    with patch("subprocess.run", side_effect=[read_proc, write_proc]) as r:
+        ok, _ = admin.set_qos_max_pods_per_user("normal", 2)
+    assert ok
+    write_cmd = r.call_args_list[-1][0][0]
+    tres_arg = next(a for a in write_cmd if a.startswith("MaxTRESPerUser="))
+    assert "gres/shard=2" in tres_arg
+    assert "gres/gpu=10" in tres_arg
+
+
+def test_set_qos_max_pods_per_user_none_clears_only_shard():
+    read_proc = _proc(out="gres/gpu=10,gres/shard=4\n")
+    write_proc = _proc(out="Modified")
+    with patch("subprocess.run", side_effect=[read_proc, write_proc]) as r:
+        ok, _ = admin.set_qos_max_pods_per_user("normal", None)
+    assert ok
+    write_cmd = r.call_args_list[-1][0][0]
+    tres_arg = next(a for a in write_cmd if a.startswith("MaxTRESPerUser="))
+    assert "gres/shard" not in tres_arg
+    assert "gres/gpu=10" in tres_arg
 
 
 def test_set_qos_priority():
