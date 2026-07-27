@@ -89,6 +89,40 @@ def test_get_jobs_on_node_empty():
     assert jobs == []
 
 
+def test_pod_occupancy_assigns_cells_by_start_time():
+    out = ("42|public|train|2026-07-27T08:00:00|gres/shard:2\n"
+           "99|daham|nb|2026-07-27T09:00:00|gres/shard:1\n")
+    with patch("subprocess.run", return_value=_proc(out=out)):
+        cells = admin.pod_occupancy("iit-MS-7E06", total_pods=4)
+    assert len(cells) == 4
+    assert cells[0]["id"] == "42" and cells[1]["id"] == "42"
+    assert cells[2]["id"] == "99"
+    assert cells[3] is None
+
+
+def test_pod_occupancy_all_free_when_no_jobs():
+    with patch("subprocess.run", return_value=_proc(out="")):
+        cells = admin.pod_occupancy("iit-MS-7E06", total_pods=4)
+    assert cells == [None, None, None, None]
+
+
+def test_pod_occupancy_ignores_jobs_with_no_gpu():
+    out = "7|public|cpujob|2026-07-27T08:00:00|\n"
+    with patch("subprocess.run", return_value=_proc(out=out)):
+        cells = admin.pod_occupancy("iit-MS-7E06", total_pods=4)
+    assert cells == [None, None, None, None]
+
+
+def test_pod_occupancy_caps_at_total_pods_if_over_allocated():
+    """Defensive: never index past the grid even if SLURM briefly reports
+    more shards allocated than the grid has cells for (e.g. mid-resize)."""
+    out = "1|a|j|2026-07-27T08:00:00|gres/shard:9\n"
+    with patch("subprocess.run", return_value=_proc(out=out)):
+        cells = admin.pod_occupancy("iit-MS-7E06", total_pods=4)
+    assert len(cells) == 4
+    assert all(c is not None and c["id"] == "1" for c in cells)
+
+
 def test_resume_node_uses_sudo_n():
     with patch("subprocess.run", return_value=_proc()) as r:
         ok, _ = admin.resume_node("node1")

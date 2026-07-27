@@ -101,6 +101,44 @@ def get_jobs_on_node(node: str) -> list[dict]:
     return jobs
 
 
+def pod_occupancy(node: str, total_pods: int) -> list[dict | None]:
+    """Which running job holds each of the node's pod cells, oldest job
+    first. Purely a rendering convention: SLURM only tracks a shard COUNT
+    per job, not a specific pod identity, so cell assignment is recomputed
+    fresh on every call, never persisted."""
+    rc, out, _ = _run(["squeue", "--noheader", "--states=RUNNING",
+                        "--format=%i|%u|%j|%S|%b", f"--nodelist={node}"])
+    cells: list[dict | None] = [None] * total_pods
+    if rc != 0 or not out.strip():
+        return cells
+    jobs = []
+    for line in out.strip().splitlines():
+        parts = line.split("|")
+        if len(parts) != 5:
+            continue
+        jid, user, name, start, gres = (p.strip() for p in parts)
+        shards = 0
+        for item in gres.split(","):
+            item = item.strip()
+            if item.startswith("gres/shard:") or item.startswith("shard:"):
+                try:
+                    shards = int(item.split(":")[-1].split("(")[0])
+                except ValueError:
+                    shards = 0
+        if shards > 0:
+            jobs.append({"id": jid, "user": user, "name": name,
+                        "start": start, "shards": shards})
+    jobs.sort(key=lambda j: j["start"])
+    idx = 0
+    for j in jobs:
+        for _ in range(j["shards"]):
+            if idx >= total_pods:
+                break
+            cells[idx] = {"id": j["id"], "user": j["user"], "name": j["name"]}
+            idx += 1
+    return cells
+
+
 def cancel_jobs_on_node(node: str) -> tuple[int, list[str]]:
     jobs = get_jobs_on_node(node)
     cancelled = []
@@ -423,6 +461,37 @@ def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
          "set", f"Priority={priority}"], timeout=20)
     auditclient.log("admin_qos_modify", detail=f"{qos_name}:Priority={priority}")
     return (rc == 0), (out.strip() or "updated") if rc == 0 else (err.strip() or "failed")
+
+
+# ── Pods sub-menu ─────────────────────────────────────────────────────────────────
+
+def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
+    from rich.table import Table
+    from iitgpu.pods import pod_count, pod_resources
+    from iitgpu.slurm import get_node_stats
+    from iitgpu.ui import console, info, screen
+
+    stats = get_node_stats(node)
+    n = pod_count(stats)
+    size = pod_resources(stats)
+    cells = pod_occupancy(node, n)
+
+    t = Table(show_header=True, header_style="bold cyan")
+    t.add_column("Pod")
+    t.add_column("Status")
+    t.add_column("Job")
+    seen: set[str] = set()
+    for i, cell in enumerate(cells, start=1):
+        if cell is None:
+            t.add_row(str(i), "[dim]free[/]", "")
+        else:
+            label = "" if cell["id"] in seen else f"{cell['id']} {cell['user']} ({cell['name']})"
+            seen.add(cell["id"])
+            t.add_row(str(i), "[green]in use[/]", label)
+    screen("Pods", status=f"{n} pod(s) configured — {size.cpus} CPU / "
+                          f"{size.mem_gb} GB RAM each")
+    console.print(t)
+    info("Resizing pod count requires zero jobs running cluster-wide (Task 4).")
 
 
 # ── QOS sub-menu ──────────────────────────────────────────────────────────────────
@@ -994,6 +1063,7 @@ def admin_menu() -> None:
                 "  Drain node",
                 "  Resume node",
                 "  QOS / limits",
+                "  Pods (GPU slots)",
                 "  Maintenance notice",
                 Separator("──  Monitoring  ───────────────────────────────"),
                 "  Audit log",
@@ -1107,6 +1177,10 @@ def admin_menu() -> None:
 
         elif choice == "QOS / limits":
             _qos_menu(style)
+
+        elif choice == "Pods (GPU slots)":
+            _pods_menu(style)
+            questionary.press_any_key_to_continue("").ask()
 
         elif choice == "Maintenance notice":
             _maintenance_menu(style)
