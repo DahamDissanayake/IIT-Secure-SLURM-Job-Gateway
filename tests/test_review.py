@@ -44,14 +44,46 @@ def test_hub_states_vram_is_shared_and_not_enforced():
 def test_hub_shows_gpu_share_note():
     from iitgpu.jobs import gpu_share_note
     from iitgpu.pods import pod_count
-    ls = default_spec("batch")
-    out = _plain(render_hub(ls, None))
-    assert gpu_share_note(ls.gpu_shards, pod_count(None)).split("(")[0].strip() in out
+    stats = _stats(3)
+    ls = default_spec("batch", stats)
+    out = _plain(render_hub(ls, stats))
+    assert gpu_share_note(ls.gpu_shards, pod_count(stats)).split("(")[0].strip() in out
+
+
+def test_hub_share_note_says_unknown_rather_than_claiming_the_whole_gpu():
+    """I1: pod_count() floors at 1, so with no live stats the share note read
+    "the whole GPU (no one else can use it)" — the hub asserting sole ownership
+    of a card it could not even see. It must degrade to unknown instead."""
+    out = _plain(render_hub(default_spec("batch"), None)).lower()
+    assert "whole gpu" not in out
+    assert "unknown" in out
+
+
+def test_hub_pod_row_claims_no_fraction_without_live_stats():
+    """Same finding, the Pods row: "1 pod — whole GPU" became "share unknown"."""
+    out = _plain(render_hub(default_spec("batch"), None))
+    assert "GPU share unknown" in out
+    assert "1/1 GPU" not in out
 
 
 def test_hub_availability_unknown_degrades():
     out = _plain(render_hub(default_spec("batch"), None))
     assert "availability unknown" in out.lower()
+
+
+def test_edit_pods_refuses_to_offer_a_menu_it_cannot_size(monkeypatch):
+    """I1: with no live stats the stepper offered exactly one row, labelled
+    "1 pod — whole GPU". Nothing honest can be offered, so nothing is."""
+    import iitgpu.review as R
+
+    def _never(*a, **kw):
+        raise AssertionError("no pod menu may be shown when the pod count is unknown")
+
+    monkeypatch.setattr(R, "select_menu", _never)
+    ls = default_spec("batch")
+    before = (ls.gpu_shards, ls.cpus, ls.mem_gb)
+    R._edit_pods(ls, None)
+    assert (ls.gpu_shards, ls.cpus, ls.mem_gb) == before
 
 
 def test_run_hub_launch_and_cancel(monkeypatch):

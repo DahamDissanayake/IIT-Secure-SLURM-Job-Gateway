@@ -789,6 +789,9 @@ def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch
     monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
     monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: False))
     monkeypatch.setattr("iitgpu.review.get_node_stats", lambda *a, **kw: None)
+    # No reachable cluster, deterministically — the point of the cpus/mem_gb
+    # assertions below is what the wizard does when scontrol tells it nothing.
+    monkeypatch.setattr(wiz, "get_node_stats", lambda *a, **kw: None)
 
     def _never(*a, **kw):
         raise AssertionError("cancelling at the hub must not submit anything")
@@ -799,14 +802,22 @@ def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch
     monkeypatch.setattr(wiz, "run_hub",
                         lambda ls, *a, **kw: seen.update(
                             script=ls.script, intent=ls.intent,
-                            shards=ls.gpu_shards, time=ls.time_limit)
+                            shards=ls.gpu_shards, time=ls.time_limit,
+                            cpus=ls.cpus, mem_gb=ls.mem_gb)
                         or real_hub(ls, *a, **kw))
 
     wiz.run_wizard()
 
     assert seen["intent"] == "batch"
     assert seen["script"] == str(script)
-    assert seen["shards"] == 1 and seen["time"] == "04:00:00"   # Standard default
+    assert seen["shards"] == 1 and seen["time"] == "04:00:00"   # one-pod default
+    # C1 regression: the main intent path called default_spec(intent) with no
+    # stats, and apply_pods wrote pods.pod_resources(None)'s degenerate 1 CPU /
+    # 1 GB over the LaunchSpec defaults — every wizard-launched job was sized
+    # 1/1 and nothing noticed, because this capture only looked at shards/time.
+    assert (seen["cpus"], seen["mem_gb"]) != (1, 1), (
+        "wizard sized the job at the degenerate no-stats fallback")
+    assert seen["cpus"] == 8 and seen["mem_gb"] == 14
 
 
 def test_other_back_returns_to_the_intent_list_not_out_of_the_wizard(monkeypatch):

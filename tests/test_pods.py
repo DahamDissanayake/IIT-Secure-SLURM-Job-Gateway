@@ -1,7 +1,8 @@
 """Pure pod-sizing math: cpu/mem/VRAM per pod, derived live from NodeStats,
 never from a hardcoded constant."""
 from iitgpu.pods import (PodSize, estimated_vram_gb, fits_new_pod_count,
-                          pod_count, pod_resources, resources_for)
+                          pod_count, pod_count_known, pod_resources,
+                          resources_for)
 from iitgpu.slurm import NodeStats
 
 
@@ -22,6 +23,17 @@ def test_pod_count_reads_live_shard_total():
 def test_pod_count_falls_back_to_one_when_stats_unavailable():
     assert pod_count(None) == 1
     assert pod_count(_stats(shard_total=0)) == 1
+
+
+def test_pod_count_known_separates_a_real_one_pod_node_from_no_reading():
+    """pod_count() answers 1 for both "one pod" and "no idea". Callers that
+    would otherwise assert a fraction, resize a job or set a ceiling need to
+    tell those apart -- conflating them is what made an unreachable cluster
+    report "the whole GPU" and shrink jobs to 1 CPU / 1 GB."""
+    assert pod_count_known(_stats(shard_total=1)) is True
+    assert pod_count_known(_stats(shard_total=4)) is True
+    assert pod_count_known(None) is False
+    assert pod_count_known(_stats(shard_total=0)) is False
 
 
 def test_pod_resources_matches_the_existing_hand_picked_slice_size():

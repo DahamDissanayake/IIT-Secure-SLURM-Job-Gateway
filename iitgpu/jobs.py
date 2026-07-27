@@ -88,9 +88,16 @@ def gpu_share_note(gpu_shards: int, total_shards: int) -> str:
 
     Pure -- total_shards must be passed in by the caller (e.g.
     `pods.pod_count(get_node_stats())`), never fetched internally, so this
-    stays a fast, testable, no-I/O function."""
+    stays a fast, testable, no-I/O function.
+
+    total_shards <= 0 means "the caller could not read the cluster's pod count"
+    (see pods.pod_count_known) and produces an honest unknown, NOT a claim of
+    whole-GPU ownership -- pod_count()'s floor of 1 used to make an unreachable
+    cluster read as "the whole GPU (no one else can use it)"."""
     if gpu_shards <= 0:
         return "no GPU (CPU-only)"
+    if total_shards <= 0:
+        return "GPU share unknown (the cluster's pod count could not be read)"
     if gpu_shards >= total_shards:
         return "the whole GPU (no one else can use it)"
     return (f"{gpu_shards}/{total_shards} of the GPU "

@@ -30,8 +30,27 @@ def pod_count(stats: NodeStats | None) -> int:
     return stats.shard_total
 
 
+def pod_count_known(stats: NodeStats | None) -> bool:
+    """True only when live SLURM state actually told us how the node is split.
+
+    pod_count() answers 1 for BOTH "the node really has one pod" and "we could
+    not read the node at all" -- a safe floor for arithmetic, but indistinguishable
+    to a caller. Anything that would otherwise assert a fraction to the user
+    ("the whole GPU"), resize a job, or impose a ceiling must check this first
+    and degrade to "unknown" instead of asserting something it cannot know.
+    """
+    return stats is not None and getattr(stats, "shard_total", 0) > 0
+
+
 def pod_resources(stats: NodeStats | None) -> PodSize:
-    """CPU/RAM for a single pod, floor-divided from the node's real totals."""
+    """CPU/RAM for a single pod, floor-divided from the node's real totals.
+
+    With no stats this returns a deliberately minimal 1 CPU / 1 GB: the pure
+    math layer has nothing to divide, and under-promising beats inventing a
+    size. It is NOT a sensible default to hand a real job -- callers that size
+    a LaunchSpec/JobSpec must gate on pod_count_known() and keep their own
+    defaults rather than overwrite them with this (see launchspec.apply_pods).
+    """
     if stats is None:
         return PodSize(cpus=1, mem_gb=1)
     n = pod_count(stats)

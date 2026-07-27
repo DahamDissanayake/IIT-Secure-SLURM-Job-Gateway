@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from iitgpu.jobs import JobSpec
-from iitgpu.pods import estimated_vram_gb, pod_count, resources_for
+from iitgpu.pods import pod_count, pod_count_known, resources_for
 
 
 @dataclass
@@ -38,11 +38,30 @@ _INTENT_DEFAULT_TIME = {"notebook": "06:00:00", "shell": "02:00:00"}
 
 
 def apply_pods(ls: LaunchSpec, k: int, stats) -> None:
-    """Set ls to request k pods, sizing cpus/mem_gb to match live node totals."""
+    """Set ls to request k pods, sizing cpus/mem_gb to match live node totals.
+
+    When the live pod count is UNKNOWN (no stats, or SLURM reporting zero
+    shards) cpus/mem_gb are left exactly as they are — the LaunchSpec dataclass
+    defaults, or whatever a template/rerun already put there. pods.pod_resources
+    answers a degenerate 1 CPU / 1 GB in that case, and writing that in would
+    silently shrink every job the wizard launches without a reachable cluster
+    to 1/1 (the C1 regression). gpu_shards still records what was asked for,
+    floored at 1, since a pod request of "at least one" is safe to keep.
+    """
+    if not pod_count_known(stats):
+        ls.gpu_shards = max(1, k)
+        return
     ls.cpus, ls.mem_gb, ls.gpu_shards = resources_for(k, stats)
 
 
 def default_spec(intent: str, stats=None) -> LaunchSpec:
+    """A fresh LaunchSpec for *intent*, sized from live node stats when given.
+
+    *stats* is optional and this module stays I/O-free by design: callers that
+    can reach SLURM (wizard.py) pass `get_node_stats()` so sizing is live;
+    callers that cannot get the LaunchSpec dataclass defaults (8 CPU / 14 GB),
+    which is a reasonable pod-sized job, not the degenerate 1/1 fallback.
+    """
     ls = LaunchSpec(intent=intent)
     apply_pods(ls, _INTENT_DEFAULT_PODS.get(intent, 1), stats)
     ls.time_limit = _INTENT_DEFAULT_TIME.get(intent, "04:00:00")
@@ -50,14 +69,20 @@ def default_spec(intent: str, stats=None) -> LaunchSpec:
 
 
 def pod_label(ls: LaunchSpec, stats) -> str:
-    n = pod_count(stats)
-    frac = "whole GPU" if ls.gpu_shards >= n else f"{ls.gpu_shards}/{n} GPU"
     plural = "" if ls.gpu_shards == 1 else "s"
+    if not pod_count_known(stats):
+        # We do not know how many pods the node is split into, so we cannot
+        # claim any fraction of it — least of all "whole GPU", which is what
+        # pod_count()'s floor of 1 would otherwise make this say.
+        frac = "GPU share unknown"
+    else:
+        n = pod_count(stats)
+        frac = "whole GPU" if ls.gpu_shards >= n else f"{ls.gpu_shards}/{n} GPU"
     return f"{ls.gpu_shards} pod{plural} — {frac} · {ls.cpus} CPU · {ls.mem_gb} GB"
 
 
 def _slices_free(stats) -> int | None:
-    if stats and getattr(stats, "shard_total", 0):
+    if pod_count_known(stats):
         return max(0, stats.shard_total - stats.shard_alloc)
     return None
 
@@ -127,9 +152,13 @@ def recent_scripts(jobs_dir: str, user: str, limit: int = 5) -> list[str]:
 _TEMPLATE_INTENT = {"notebook": "notebook", "interactive": "shell"}
 
 
-def from_template(tdata: dict) -> LaunchSpec:
+def from_template(tdata: dict, stats=None) -> LaunchSpec:
+    """A stored template normally carries its own gpu_shards/cpus/mem_gb; when a
+    field is missing the base default_spec sizing shows through, so *stats* is
+    threaded here too — live pod sizing when the caller has it, the LaunchSpec
+    dataclass defaults (8 CPU / 14 GB) when it does not. Never 1 CPU / 1 GB."""
     intent = _TEMPLATE_INTENT.get(tdata.get("task_type", ""), "batch")
-    ls = default_spec(intent)
+    ls = default_spec(intent, stats)
     for f_ in ("conda_env", "venv_path", "container_image", "data_path",
                "model_path", "array", "dependency"):
         if tdata.get(f_):
@@ -146,14 +175,17 @@ def from_template(tdata: dict) -> LaunchSpec:
     return ls
 
 
-def from_rerun(parsed: dict, script: str) -> LaunchSpec:
+def from_rerun(parsed: dict, script: str, stats=None) -> LaunchSpec:
     """Rebuild a launch from a previous job's parsed sbatch.
 
     "Re-run" has to mean re-run: carrying the sizing but dropping the
     environment, the data path and the arguments produces a job that looks like
     the original in the queue and does something else entirely.
+
+    *stats* only backs the fields the parsed sbatch did not supply (same rule as
+    from_template) — anything the old job actually recorded still wins.
     """
-    ls = default_spec("batch")
+    ls = default_spec("batch", stats)
     ls.script = script
     for f_ in ("gpu_shards", "cpus", "mem_gb"):
         if parsed.get(f_) is not None:

@@ -258,9 +258,15 @@ def _tier3_own_script(username: str, cfg) -> str | None:
 def _current_share_note(gpu_shards: int) -> str:
     """gpu_share_note() is pure and needs the live pod total passed in --
     this is the one place in the wizard flow that fetches it, so the three
-    call sites below don't each need their own get_node_stats() call."""
-    from iitgpu.pods import pod_count
-    return gpu_share_note(gpu_shards, pod_count(get_node_stats()))
+    call sites below don't each need their own get_node_stats() call.
+
+    A total of 0 tells gpu_share_note the pod count is unknown: pod_count()
+    floors at 1, so an unreachable cluster used to be reported to the user as
+    "the whole GPU (no one else can use it)"."""
+    from iitgpu.pods import pod_count, pod_count_known
+    stats = get_node_stats()
+    return gpu_share_note(gpu_shards,
+                          pod_count(stats) if pod_count_known(stats) else 0)
 
 
 def _vram_check() -> bool:
@@ -713,7 +719,8 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
     if prefill:
         # Re-run: the previous job's own sbatch is the source of truth for
         # sizing; the hub is where anything about it gets changed.
-        ls = from_rerun(prefill, prefill.get("script_path", ""))
+        ls = from_rerun(prefill, prefill.get("script_path", ""),
+                        get_node_stats())
         info("Pre-filled from the previous run — change anything below.")
         # The script path came out of a file on disk, not out of this session:
         # the job may have been archived, renamed, or written by hand. Anything
@@ -735,9 +742,11 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             return
 
         if choice == _FINETUNE_CHOICE:
-            ls = default_spec("batch")
             from iitgpu.pods import pod_count
             _stats = get_node_stats()
+            # Live stats go into default_spec too: with none, apply_pods leaves
+            # cpus/mem_gb at the LaunchSpec defaults rather than sizing them.
+            ls = default_spec("batch", _stats)
             apply_pods(ls, pod_count(_stats), _stats)
             ls.time_limit = "08:00:00"
             _apply_default_env(ls, cfg, prefer=_FINETUNE_ENV_NAME)
@@ -757,7 +766,11 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             intent = next((k for k, label in _INTENTS if label == choice), None)
             if intent is None:
                 return
-            ls = default_spec(intent)
+            # Live stats, not None: launchspec is I/O-free by design, so the
+            # cpus/mem_gb of every wizard-launched job are only cluster-derived
+            # if this call site supplies the reading (C1 — this path used to
+            # pass nothing and take the fallback for every single job).
+            ls = default_spec(intent, get_node_stats())
             _apply_default_env(ls, cfg)
             break
 
@@ -774,7 +787,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
         tdata = pick_template(cfg)
         if not tdata:
             continue                      # nothing picked — still in the wizard
-        ls = from_template(tdata)
+        ls = from_template(tdata, get_node_stats())
 
     if ls.intent == "notebook":
         ls.port = 8888

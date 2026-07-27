@@ -34,6 +34,36 @@ def test_apply_pods_clamps_to_pod_count():
     assert ls.gpu_shards == 4
 
 
+def test_apply_pods_keeps_sane_defaults_when_the_pod_count_is_unknown():
+    """C1: with no stats, resources_for() answers pods.pod_resources(None)'s
+    degenerate 1 CPU / 1 GB. Writing that into the LaunchSpec sized every job
+    the wizard launched without a reachable cluster at 1/1. The sizing fields
+    must be left alone instead; only gpu_shards is recorded."""
+    ls = LaunchSpec(intent="batch")           # dataclass defaults: 8 CPU / 14 GB
+    apply_pods(ls, 1, None)
+    assert (ls.cpus, ls.mem_gb) == (8, 14)
+    assert ls.gpu_shards == 1
+
+    # Same rule for a node that answers but reports no shards at all.
+    ls2 = LaunchSpec(intent="batch", cpus=16, mem_gb=60)
+    apply_pods(ls2, 2, _stats(free=0, shard_total=0))
+    assert (ls2.cpus, ls2.mem_gb) == (16, 60)
+
+
+def test_default_spec_without_stats_is_pod_sized_not_degenerate():
+    """The exact C1 reproduction: wizard.py's main intent path called
+    default_spec(intent) with no stats and got a 1 CPU / 1 GB notebook."""
+    ls = default_spec("notebook")
+    assert (ls.cpus, ls.mem_gb) != (1, 1)
+    assert (ls.gpu_shards, ls.cpus, ls.mem_gb, ls.time_limit) == (1, 8, 14, "06:00:00")
+
+
+def test_default_spec_with_live_stats_still_uses_the_live_numbers():
+    """The fallback must not shadow a real reading when one is available."""
+    ls = default_spec("batch", _stats(free=4, shard_total=8))
+    assert (ls.cpus, ls.mem_gb) == (4, 7)     # 32//8 CPU, (60-2)//8 GB
+
+
 def test_a_full_cards_worth_of_one_pod_jobs_fits_the_node():
     stats = _stats(free=4)
     ls = LaunchSpec(intent="notebook")
@@ -69,6 +99,17 @@ def test_pod_label_says_whole_gpu_at_full_pod_count():
     ls = LaunchSpec(intent="batch")
     apply_pods(ls, 4, _stats(free=4))
     assert "whole GPU" in pod_label(ls, _stats(free=4))
+
+
+def test_pod_label_says_share_unknown_without_a_live_pod_count():
+    """I1: pod_count() floors at 1, so a spec with 1 pod and no stats used to
+    render "1 pod - whole GPU". Unknown must read as unknown."""
+    ls = LaunchSpec(intent="batch")
+    for stats in (None, _stats(free=0, shard_total=0)):
+        label = pod_label(ls, stats)
+        assert "GPU share unknown" in label
+        assert "whole GPU" not in label
+        assert "8 CPU" in label and "14 GB" in label
 
 
 def test_pod_availability_reports_starts_now_or_queues():

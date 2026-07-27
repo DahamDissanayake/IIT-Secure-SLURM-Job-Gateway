@@ -10,7 +10,7 @@ from rich.panel import Panel
 from iitgpu.jobs import gpu_share_note
 from iitgpu.launchspec import (LaunchSpec, apply_pods, availability_line,
                                pod_availability, pod_label)
-from iitgpu.pods import estimated_vram_gb, pod_count
+from iitgpu.pods import estimated_vram_gb, pod_count, pod_count_known
 from iitgpu.slurm import get_node_stats
 from iitgpu.ui import console, info, select_menu, warn
 
@@ -97,13 +97,25 @@ def render_hub(ls: LaunchSpec, stats) -> Panel:
     hidden = _noop_fields(ls)
     rows = [(k, v) for k, v in rows if k not in hidden]
     body = "\n".join(f"  [bold]{k:<12}[/] {v}" for k, v in rows)
-    share = gpu_share_note(ls.gpu_shards, pod_count(stats))
+    # 0 == "pod count unknown" to gpu_share_note. Passing pod_count(stats)
+    # unconditionally made an unreachable cluster claim "the whole GPU (no one
+    # else can use it)", because pod_count() floors at 1.
+    share = gpu_share_note(ls.gpu_shards,
+                           pod_count(stats) if pod_count_known(stats) else 0)
     body += f"\n\n  [dim]{share}[/]\n  [dim]{_vram_note(ls, stats)}[/]"
     return Panel(body, title=f"[bold] Ready to launch ─ {availability_line(stats)} [/bold]",
                  border_style="cyan")
 
 
 def _edit_pods(ls: LaunchSpec, stats) -> None:
+    if not pod_count_known(stats):
+        # pod_count() floors at 1, so without live stats this used to offer a
+        # single row that read "1 pod — whole GPU": a menu with one lie in it.
+        # There is nothing honest to offer, so say why and change nothing.
+        warn("GPU availability unknown — the cluster's pod count could not be "
+             "read, so the pod sizes cannot be listed. Keeping the current "
+             "sizing.")
+        return
     n = pod_count(stats)
     choices, mapping = [], {}
     for k in range(1, n + 1):
