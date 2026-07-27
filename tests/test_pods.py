@@ -79,9 +79,13 @@ def test_fits_new_pod_count_rejects_zero_cpu_per_pod():
 
 
 def test_fits_new_pod_count_rejects_zero_mem_per_pod():
-    stats = _stats(cpu_total=32, mem_total_mb=62000)
-    ok, msg = fits_new_pod_count(60, stats)
-    assert not ok and ("0 GB" in msg or "0 CPU" in msg)
+    # Use a fixture where memory is the scarcer resource, so the mem_gb < 1
+    # branch (not the CPU branch) is actually triggered. With cpu_total=64 and
+    # usable_mem_gb=8 (10240 MB / 1024 - 2), N=9 gives cpus=7 (passes) but
+    # mem_gb=0 (fails mem check).
+    stats = _stats(cpu_total=64, mem_total_mb=10240)
+    ok, msg = fits_new_pod_count(9, stats)
+    assert not ok and "0 GB" in msg
 
 
 def test_fits_new_pod_count_accepts_reasonable_n():
