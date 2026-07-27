@@ -123,6 +123,48 @@ def test_pod_occupancy_caps_at_total_pods_if_over_allocated():
     assert all(c is not None and c["id"] == "1" for c in cells)
 
 
+# ── Pod count resize ────────────────────────────────────────────────────────
+
+def test_resize_pod_count_refuses_when_jobs_running():
+    out = "42|public|train|RUNNING\n"
+    with patch("subprocess.run", return_value=_proc(out=out)):
+        ok, msg = admin.resize_pod_count(5)
+    assert not ok
+    assert "running" in msg.lower() or "active" in msg.lower()
+
+
+def test_resize_pod_count_refuses_degenerate_n(monkeypatch):
+    from iitgpu.slurm import NodeStats
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+    with patch("subprocess.run", return_value=_proc(out="")), \
+         patch("iitgpu.admin.get_node_stats", return_value=stats):
+        ok, msg = admin.resize_pod_count(40)
+    assert not ok
+    assert "0 CPU" in msg
+
+
+def test_resize_pod_count_runs_the_script_when_clear(monkeypatch):
+    from iitgpu.slurm import NodeStats
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+
+    def fake_run(cmd, timeout=15, stdin_data=None):
+        if cmd[0] == "squeue":
+            return 0, "", ""
+        assert cmd[-1] == "5"
+        assert "resize-pods.sh" in cmd[-2]
+        return 0, "resize applied: pod count is now 5", ""
+
+    with patch("iitgpu.admin._run", side_effect=fake_run), \
+         patch("iitgpu.admin.get_node_stats", return_value=stats):
+        ok, msg = admin.resize_pod_count(5)
+    assert ok
+    assert "5" in msg
+
+
 def test_resume_node_uses_sudo_n():
     with patch("subprocess.run", return_value=_proc()) as r:
         ok, _ = admin.resume_node("node1")

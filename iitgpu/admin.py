@@ -23,6 +23,7 @@ from pathlib import Path
 from iitgpu import auditclient
 from iitgpu.config import load_config, is_admin
 from iitgpu import daemonclient
+from iitgpu.slurm import get_node_stats
 
 # Sri Lanka Standard Time = UTC+5:30
 def _cluster_tz():
@@ -465,11 +466,38 @@ def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
 
 # ── Pods sub-menu ─────────────────────────────────────────────────────────────────
 
+def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
+    """Admin action: change the cluster's pod count. Refuses if any job is
+    running/queued anywhere, or if new_n would floor CPU/mem per pod to
+    zero. Otherwise shells out to resize-pods.sh, which does the actual
+    cross-node config rewrite + restart + verify."""
+    rc, out, _ = _run(["squeue", "--noheader"])
+    if rc == 0 and out.strip():
+        n_jobs = len(out.strip().splitlines())
+        return False, f"{n_jobs} job(s) still active cluster-wide -- refusing to resize"
+
+    stats = get_node_stats(node)
+    if stats is None:
+        return False, "Cannot read live node stats -- refusing to resize blind"
+
+    from iitgpu.pods import fits_new_pod_count
+    fits, msg = fits_new_pod_count(new_n, stats)
+    if not fits:
+        return False, msg
+
+    rc, out, err = _run(
+        ["sudo", "-n", "/opt/iit-gpu/deploy/resize-pods.sh", str(new_n)], timeout=120)
+    auditclient.log("admin_pod_resize", detail=f"new_n={new_n} rc={rc}")
+    if rc != 0:
+        return False, (err.strip() or out.strip() or "resize failed")
+    return True, (out.strip() or f"resize applied: pod count is now {new_n}")
+
+
 def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
+    import questionary
     from rich.table import Table
     from iitgpu.pods import pod_count, pod_resources
-    from iitgpu.slurm import get_node_stats
-    from iitgpu.ui import console, info, screen
+    from iitgpu.ui import console, ok, err, screen
 
     stats = get_node_stats(node)
     n = pod_count(stats)
@@ -491,7 +519,15 @@ def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
     screen("Pods", status=f"{n} pod(s) configured — {size.cpus} CPU / "
                           f"{size.mem_gb} GB RAM each")
     console.print(t)
-    info("Resizing pod count requires zero jobs running cluster-wide (Task 4).")
+
+    if questionary.confirm("Resize pod count?", default=False, style=style).ask():
+        val = questionary.text(f"New pod count (currently {n}):", style=style).ask()
+        try:
+            new_n = int((val or "").strip())
+        except ValueError:
+            err("Enter a whole number."); return
+        good, msg = resize_pod_count(new_n)
+        (ok if good else err)(msg)
 
 
 # ── QOS sub-menu ──────────────────────────────────────────────────────────────────
