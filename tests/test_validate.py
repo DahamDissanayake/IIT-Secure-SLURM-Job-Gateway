@@ -367,3 +367,29 @@ def test_validate_sbatch_ceiling_tracks_a_resized_pod_count(tmp_path):
          patch("iitgpu.slurm.get_node_stats", return_value=stats):
         errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
     assert errors == []
+
+
+def test_shard_ceiling_falls_back_to_the_env_var_when_shards_report_zero(tmp_path):
+    """I2: a node that answers but reports zero shards is a gres-reporting
+    hiccup, not a 1-pod cluster. `_max_gpu_shards` only checked `stats is not
+    None`, so `pod_count()`'s floor of 1 became the ceiling and every
+    `--gres=shard:2+` was rejected on a healthy cluster. Zero shards must fall
+    back to MAX_GPU_SHARDS, the same as an unreachable scontrol."""
+    os.environ.update({"NFS_ROOT": str(tmp_path), "MAX_GPU_SHARDS": "4"})
+    _user_dir(tmp_path)
+    import importlib, iitgpu.validate as v; importlib.reload(v)
+    from unittest.mock import patch
+    from iitgpu.slurm import NodeStats
+    zero = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                     mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                     shard_total=0, shard_alloc=0)
+    try:
+        with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
+             patch("iitgpu.slurm.get_node_stats", return_value=zero):
+            assert v._max_gpu_shards() == 4
+            assert v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice") == []
+            over = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
+        assert any("slice" in e.lower() for e in over), over
+    finally:
+        os.environ.pop("MAX_GPU_SHARDS", None)
+        importlib.reload(v)

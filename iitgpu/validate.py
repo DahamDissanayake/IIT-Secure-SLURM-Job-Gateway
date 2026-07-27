@@ -15,12 +15,19 @@ MAX_HOURS = int(os.environ.get("MAX_HOURS", "72"))
 
 def _max_gpu_shards() -> int:
     """Live ceiling: never more shards than the cluster currently has pods.
-    Falls back to the MAX_GPU_SHARDS env var if scontrol is unreachable."""
+    Falls back to the MAX_GPU_SHARDS env var if scontrol is unreachable.
+
+    "Unreachable" includes a reply that reports no shards at all: pod_count()
+    floors at 1, so a gres-reporting hiccup on a healthy 4-pod node would
+    otherwise reject every --gres=shard:2+ request as over capacity. The env var
+    is the configured truth; only a live reading that actually knows the pod
+    count is allowed to override it.
+    """
     try:
-        from iitgpu.pods import pod_count
+        from iitgpu.pods import pod_count, pod_count_known
         from iitgpu.slurm import get_node_stats
         stats = get_node_stats()
-        if stats is not None:
+        if pod_count_known(stats):
             return pod_count(stats)
     except Exception:
         pass

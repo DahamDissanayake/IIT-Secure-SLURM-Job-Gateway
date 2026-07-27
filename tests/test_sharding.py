@@ -6,6 +6,8 @@ request slices (--gres=shard:N) instead. Pod count (how many slices the card
 is split into) is read live from NodeStats, not a hardcoded constant -- these
 tests pin it at today's real cluster value (4) via an explicit stats fixture.
 """
+from unittest.mock import patch
+
 import pytest
 
 from iitgpu.jobs import (
@@ -106,16 +108,32 @@ def test_gpu_share_note_explains_what_is_left():
     assert "1/4" in partial and "left for others" in partial
 
 
+def test_gpu_share_note_says_unknown_when_the_pod_count_is_unreadable():
+    """I1: callers signal "couldn't read the cluster" with total_shards=0.
+    pod_count() floors at 1, so passing it through blind made an unreachable
+    cluster claim the user owned the whole card."""
+    note = gpu_share_note(1, 0)
+    assert "unknown" in note.lower()
+    assert "whole GPU" not in note
+    # A CPU-only job is still CPU-only, known pod count or not.
+    assert "no GPU" in gpu_share_note(0, 0)
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 
 def test_shard_request_is_not_measured_against_whole_gpu_limit(monkeypatch):
-    """A site with one physical GPU may set MAX_GPUS=1; shard:4 is still legal."""
+    """A site with one physical GPU may set MAX_GPUS=1; shard:4 is still legal.
+
+    get_node_stats is patched (not left ambient) so the shard ceiling comes from
+    a known 4-pod node whatever machine runs the suite — validate._max_gpu_shards
+    reads it live now."""
     monkeypatch.setenv("MAX_GPUS", "1")
     monkeypatch.setenv("MAX_GPU_SHARDS", "4")
     import importlib, iitgpu.validate as v
     importlib.reload(v)
     try:
-        errors = v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice")
+        with patch("iitgpu.slurm.get_node_stats", return_value=_stats()):
+            errors = v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice")
         assert not any("GPU" in e for e in errors), errors
     finally:
         importlib.reload(v)
@@ -126,7 +144,8 @@ def test_shard_request_beyond_capacity_is_rejected(monkeypatch):
     import importlib, iitgpu.validate as v
     importlib.reload(v)
     try:
-        errors = v.validate_sbatch("#SBATCH --gres=shard:9\n", "alice")
+        with patch("iitgpu.slurm.get_node_stats", return_value=_stats()):
+            errors = v.validate_sbatch("#SBATCH --gres=shard:9\n", "alice")
         assert any("slices" in e for e in errors), errors
     finally:
         importlib.reload(v)
