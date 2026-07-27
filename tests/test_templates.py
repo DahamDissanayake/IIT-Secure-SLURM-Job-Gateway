@@ -5,13 +5,19 @@ import pytest
 
 def test_builtin_presets_gpu_count_matches_cluster(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    from iitgpu.jobs import SHARDS_PER_GPU
+    from iitgpu.pods import pod_count
+    from iitgpu.slurm import NodeStats
     from iitgpu.templates import _BUILTIN_PRESETS
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0,
+                      gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+    n = pod_count(stats)
     for name, preset in _BUILTIN_PRESETS.items():
         shards = preset["gpu_shards"]
-        assert shards <= SHARDS_PER_GPU, (
+        assert shards <= n, (
             f"Preset '{name}' requests {shards} GPU slices "
-            f"but the cluster has {SHARDS_PER_GPU}"
+            f"but the cluster has {n}"
         )
 
 

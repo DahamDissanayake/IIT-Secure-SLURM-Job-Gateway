@@ -6,29 +6,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from iitgpu.jobs import SHARDS_PER_GPU, JobSpec
-
-
-@dataclass(frozen=True)
-class Size:
-    name: str
-    gpu_shards: int
-    cpus: int
-    mem_gb: int
-    default_time: str
-
-
-SIZES: dict[str, Size] = {
-    "small":    Size("Small", 1, 4, 8, "02:00:00"),
-    "standard": Size("Standard", 1, 8, 14, "04:00:00"),
-    "whole":    Size("Whole GPU", SHARDS_PER_GPU, 16, 60, "08:00:00"),
-}
-
-_INTENT_DEFAULTS = {  # (size key, time override or None)
-    "notebook": ("standard", "06:00:00"),
-    "batch":    ("standard", None),
-    "shell":    ("small", None),
-}
+from iitgpu.jobs import JobSpec
+from iitgpu.pods import estimated_vram_gb, pod_count, resources_for
 
 
 @dataclass
@@ -39,7 +18,7 @@ class LaunchSpec:
     conda_env: str = ""
     venv_path: str = ""
     container_image: str = ""
-    gpu_shards: int = 1
+    gpu_shards: int = 1     # this IS the pod count -- 1 shard == 1 pod
     cpus: int = 8
     mem_gb: int = 14
     time_limit: str = "04:00:00"
@@ -54,40 +33,27 @@ class LaunchSpec:
     port: int = 8888
 
 
-def apply_size(ls: LaunchSpec, name: str) -> None:
-    s = SIZES[name]
-    ls.gpu_shards, ls.cpus, ls.mem_gb = s.gpu_shards, s.cpus, s.mem_gb
-    ls.time_limit = s.default_time
+_INTENT_DEFAULT_PODS = {"notebook": 1, "batch": 1, "shell": 1}
+_INTENT_DEFAULT_TIME = {"notebook": "06:00:00", "shell": "02:00:00"}
 
 
-def default_spec(intent: str) -> LaunchSpec:
-    size_key, time_override = _INTENT_DEFAULTS.get(intent, ("standard", None))
+def apply_pods(ls: LaunchSpec, k: int, stats) -> None:
+    """Set ls to request k pods, sizing cpus/mem_gb to match live node totals."""
+    ls.cpus, ls.mem_gb, ls.gpu_shards = resources_for(k, stats)
+
+
+def default_spec(intent: str, stats=None) -> LaunchSpec:
     ls = LaunchSpec(intent=intent)
-    apply_size(ls, size_key)
-    if time_override:
-        ls.time_limit = time_override
+    apply_pods(ls, _INTENT_DEFAULT_PODS.get(intent, 1), stats)
+    ls.time_limit = _INTENT_DEFAULT_TIME.get(intent, "04:00:00")
     return ls
 
 
-def size_name_for(ls: LaunchSpec) -> str | None:
-    for key, s in SIZES.items():
-        if (ls.gpu_shards, ls.cpus, ls.mem_gb) == (s.gpu_shards, s.cpus, s.mem_gb):
-            return key
-    return None
-
-
-def _frac(shards: int) -> str:
-    if shards >= SHARDS_PER_GPU:
-        return f"{SHARDS_PER_GPU}/{SHARDS_PER_GPU} GPU"
-    if shards == 1 and SHARDS_PER_GPU == 4:
-        return "¼ GPU"
-    return f"{shards}/{SHARDS_PER_GPU} GPU"
-
-
-def size_label(ls: LaunchSpec) -> str:
-    key = size_name_for(ls)
-    name = SIZES[key].name if key else "Custom"
-    return f"{name} — {_frac(ls.gpu_shards)} · {ls.cpus} CPU · {ls.mem_gb} GB"
+def pod_label(ls: LaunchSpec, stats) -> str:
+    n = pod_count(stats)
+    frac = "whole GPU" if ls.gpu_shards >= n else f"{ls.gpu_shards}/{n} GPU"
+    plural = "" if ls.gpu_shards == 1 else "s"
+    return f"{ls.gpu_shards} pod{plural} — {frac} · {ls.cpus} CPU · {ls.mem_gb} GB"
 
 
 def _slices_free(stats) -> int | None:
@@ -103,13 +69,13 @@ def availability_line(stats) -> str:
     return f"GPU now: {free}/{stats.shard_total} slices free"
 
 
-def size_availability(gpu_shards: int, stats) -> str:
+def pod_availability(k: int, stats) -> str:
     free = _slices_free(stats)
     if free is None:
         return "— availability unknown"
-    if gpu_shards <= free:
-        return f"— starts now ({free} slices free)"
-    return f"— will queue (needs {gpu_shards} free, {free} free)"
+    if k <= free:
+        return f"— starts now ({free} free)"
+    return f"— will queue (needs {k}, {free} free)"
 
 
 def to_job_spec(ls: LaunchSpec, *, user: str, partition: str, job_name: str,
