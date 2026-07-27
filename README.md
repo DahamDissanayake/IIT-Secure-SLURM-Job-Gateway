@@ -168,8 +168,18 @@ Nothing runs the TUI itself as root. Two narrow `sudoers.d` files grant exactly 
     /usr/sbin/chpasswd, /usr/bin/sacctmgr, /usr/bin/scancel
 
 %gpuadmins ALL=(%gpuusers) NOPASSWD: /usr/local/bin/iit-gpu-manager
+
+%gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/iit-gpu/deploy/resize-pods.sh *
 ```
 The second line is what powers **Log in as user**: an admin can launch the TUI *as* any `gpuusers` member (`sudo -H -u <user> iit-gpu-manager`) to see exactly what that user sees — never a general shell, only ever the TUI launcher, and every action taken is audited under the *target* user's identity (via `SO_PEERCRED` on the audit socket), with the switch itself separately logged.
+
+The third line powers the admin panel's **pod-count resize** (Pods screen): the panel runs `sudo -n -u slurmadmin /opt/iit-gpu/deploy/resize-pods.sh <N>` — as `slurmadmin`, the account that owns `gres.conf`/`slurm.conf` and the `slurmctld`/`slurmd` restart path, never as root (the script refuses to run as anyone else). The grant is the run only; the script itself enforces the empty-queue check, a lockfile, and backup/rollback.
+
+> **Installing this file is a manual step.** `deploy/redeploy-igm.sh` fast-forwards `/opt/iit-gpu` and resyncs a couple of `/usr/local/bin` scripts — it does **not** touch `/etc/sudoers.d`. After any change to `deploy/sudoers-gateway-admin` (including the resize grant above), re-run the install on the login node or the affected admin action fails with a bare `sudo` permission error:
+> ```bash
+> sudo install -m 0440 -o root -g root deploy/sudoers-gateway-admin /etc/sudoers.d/iit-gpu-admin
+> sudo visudo -cf /etc/sudoers.d/iit-gpu-admin
+> ```
 
 ### `sshd` access rules (`deploy/sshd-gateway.conf`)
 
