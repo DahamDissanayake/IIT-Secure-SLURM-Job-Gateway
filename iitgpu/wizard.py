@@ -739,6 +739,7 @@ def run_wizard(prefill: dict | None = None) -> None:  # noqa: C901 (one flow, re
             from iitgpu.pods import pod_count
             _stats = get_node_stats()
             apply_pods(ls, pod_count(_stats), _stats)
+            ls.time_limit = "08:00:00"
             _apply_default_env(ls, cfg, prefer=_FINETUNE_ENV_NAME)
             picked = _pick_batch_script(jdir, user, _browse_jail, _user_browse_start())
             if not picked:

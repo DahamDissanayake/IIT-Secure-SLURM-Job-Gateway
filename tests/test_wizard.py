@@ -1123,3 +1123,42 @@ def test_finetune_branch_sets_whole_gpu_and_prefers_its_env():
     assert "prefer=_FINETUNE_ENV_NAME" in branch
     assert "_pick_batch_script(" in branch
     assert "_pick_finetune_model(cfg)" in branch
+
+
+def test_finetune_branch_sets_an_eight_hour_time_limit(monkeypatch):
+    """Behavioral, not just structural: the deleted SIZES["whole"] preset was
+    `Size("Whole GPU", SHARDS_PER_GPU, 16, 60, "08:00:00")`, and the old
+    apply_size() set ls.time_limit = s.default_time as part of applying it.
+    apply_pods() — its live-pod-count replacement — only sizes cpus/mem_gb/
+    gpu_shards and does not touch time_limit, so the branch must set the
+    8-hour default itself or a finetune job silently inherits batch's 4-hour
+    default (default_spec("batch") runs first). Drives the real run_wizard
+    up through the point the finetune branch configures ls, then cancels via
+    an unresolvable script prompt so nothing further executes."""
+    import iitgpu.wizard as wiz
+
+    selects = iter([wiz._FINETUNE_CHOICE])
+    monkeypatch.setattr("questionary.select",
+                        lambda *a, **kw: MagicMock(ask=lambda: next(selects, None)))
+    # Ends the flow right after the finetune branch configures ls, before any
+    # further prompting (_pick_batch_script sees no input and returns None).
+    monkeypatch.setattr("questionary.autocomplete",
+                        lambda *a, **kw: MagicMock(ask=lambda: None))
+
+    seen = {}
+    real_apply_default_env = wiz._apply_default_env
+
+    def _capture(ls, cfg, prefer=None):
+        seen["gpu_shards"] = ls.gpu_shards
+        seen["time_limit"] = ls.time_limit
+        seen["prefer"] = prefer
+        return real_apply_default_env(ls, cfg, prefer=prefer)
+
+    monkeypatch.setattr(wiz, "_apply_default_env", _capture)
+
+    wiz.run_wizard()
+
+    assert seen, "finetune branch never reached _apply_default_env"
+    assert seen["time_limit"] == "08:00:00"
+    assert seen["prefer"] == wiz._FINETUNE_ENV_NAME
+    assert seen["gpu_shards"] >= 1
