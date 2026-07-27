@@ -333,3 +333,37 @@ def test_browse_roots_exclude_other_users_and_jobs():
     roots = user_browse_roots("/shared", "yenuli")
     assert "/shared/users" not in roots
     assert "/shared/jobs" not in roots
+
+
+def test_validate_sbatch_rejects_excess_shards_against_live_pod_count(tmp_path):
+    """--gres=shard:N is checked against the LIVE pod count, not a fixed env
+    var -- on today's 4-pod cluster, requesting 5 must be rejected."""
+    os.environ.update({"NFS_ROOT": str(tmp_path)})
+    _user_dir(tmp_path)
+    import importlib, iitgpu.validate as v; importlib.reload(v)
+    from unittest.mock import patch
+    from iitgpu.slurm import NodeStats
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
+                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=4, shard_alloc=0)
+    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
+         patch("iitgpu.slurm.get_node_stats", return_value=stats):
+        errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
+    assert any("slice" in e.lower() or "GPU" in e for e in errors)
+
+
+def test_validate_sbatch_ceiling_tracks_a_resized_pod_count(tmp_path):
+    """If the live cluster reports 8 pods, a request for 5 must be allowed --
+    proves the check isn't still pinned to the old fixed default of 4."""
+    os.environ.update({"NFS_ROOT": str(tmp_path)})
+    _user_dir(tmp_path)
+    import importlib, iitgpu.validate as v; importlib.reload(v)
+    from unittest.mock import patch
+    from iitgpu.slurm import NodeStats
+    stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=64, cpu_alloc=0,
+                      mem_total_mb=124000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
+                      shard_total=8, shard_alloc=0)
+    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
+         patch("iitgpu.slurm.get_node_stats", return_value=stats):
+        errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
+    assert errors == []

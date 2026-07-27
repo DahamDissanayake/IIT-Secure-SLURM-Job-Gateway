@@ -13,6 +13,20 @@ MAX_MEM_GB = int(os.environ.get("MAX_MEM_GB", "256"))
 MAX_HOURS = int(os.environ.get("MAX_HOURS", "72"))
 
 
+def _max_gpu_shards() -> int:
+    """Live ceiling: never more shards than the cluster currently has pods.
+    Falls back to the MAX_GPU_SHARDS env var if scontrol is unreachable."""
+    try:
+        from iitgpu.pods import pod_count
+        from iitgpu.slurm import get_node_stats
+        stats = get_node_stats()
+        if stats is not None:
+            return pod_count(stats)
+    except Exception:
+        pass
+    return MAX_GPU_SHARDS
+
+
 def _nfs_root() -> str:
     return os.environ.get("NFS_ROOT", "/shared")
 
@@ -301,10 +315,11 @@ def validate_sbatch(text: str, username: str, cfg=None) -> list[str]:
                 pass
             else:
                 if key == "gres" and val.lower().lstrip("-").startswith("shard"):
-                    if n > MAX_GPU_SHARDS:
+                    ceiling = _max_gpu_shards()
+                    if n > ceiling:
                         errors.append(
                             f"--gres requests {n} GPU slices; "
-                            f"the cluster has {MAX_GPU_SHARDS}")
+                            f"the cluster has {ceiling}")
                 elif n > MAX_GPUS:
                     errors.append(
                         f"--{key} requests {n} GPUs; cluster limit is {MAX_GPUS}")
