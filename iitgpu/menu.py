@@ -76,10 +76,11 @@ def run_menu() -> None:
 
 
 def _notify_menu() -> None:
-    """Main Menu -> Notify When Free: subscribe to a one-time email once
-    enough GPU pods are free. Only offered while the GPU is fully occupied
-    -- if pods are already free there's nothing to wait for, so the screen
-    shows that instead of an editable subscription."""
+    """Main Menu -> Notify When Free: subscribe to a one-time email once at
+    least N pods are free. Offered whenever fewer than ALL pods are free --
+    someone with 1-2 pods free can still want to wait for 3-4 (a bigger job
+    than what's available right now). Only skipped when every pod is
+    already free, since no threshold could mean anything then."""
     import getpass
     from iitgpu.slurm import get_node_stats
     from iitgpu.ui import ok, err, screen
@@ -95,11 +96,13 @@ def _notify_menu() -> None:
     free = max(0, total - stats.shard_alloc)
     username = getpass.getuser()
 
-    if free > 0:
-        info(f"[green]✓ {free}/{total} GPU pods are already free[/] — "
-             f"you can submit a job right now. Nothing to notify.")
+    if free >= total:
+        info(f"[green]✓ All {total}/{total} GPU pods are already free[/] — "
+             f"you can submit a job right now. Nothing to wait for.")
         questionary.press_any_key_to_continue("").ask()
         return
+
+    info(f"[dim]{free}/{total} GPU pods are free right now.[/]")
 
     from iitgpu import pod_notify
     existing = pod_notify.get_subscription(username)
@@ -126,7 +129,10 @@ def _notify_menu() -> None:
         questionary.press_any_key_to_continue("").ask()
         return
 
-    pod_choices = [f"{k} pod{'s' if k != 1 else ''}" for k in range(1, total + 1)]
+    pod_choices = [
+        f"{k} pod{'s' if k != 1 else ''}" + ("  [available now]" if k <= free else "  [waiting]")
+        for k in range(1, total + 1)
+    ]
     sel = select_menu(
         "Notify me once at least how many pods are free?", pod_choices, back=BACK_TO_MAIN)
     if sel is None:
