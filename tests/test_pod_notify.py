@@ -69,7 +69,7 @@ def test_subscriptions_are_independent_per_user(_isolated_nfs_root):
 
 def test_check_and_notify_no_op_when_no_subscriptions(_isolated_nfs_root):
     pn = _isolated_nfs_root
-    with patch("iitgpu.mailer.send_pod_available_notice") as send:
+    with patch("iitgpu.mailer.send_pod_available_notice", return_value=(True, "sent")) as send:
         n = pn.check_and_notify(stats=_stats(shard_alloc=0))
     assert n == 0
     send.assert_not_called()
@@ -78,7 +78,7 @@ def test_check_and_notify_no_op_when_no_subscriptions(_isolated_nfs_root):
 def test_check_and_notify_no_op_when_threshold_not_met(_isolated_nfs_root):
     pn = _isolated_nfs_root
     pn.subscribe("alice", "alice@iit.lk", 3)
-    with patch("iitgpu.mailer.send_pod_available_notice") as send:
+    with patch("iitgpu.mailer.send_pod_available_notice", return_value=(True, "sent")) as send:
         # only 1 free, alice wants 3
         n = pn.check_and_notify(stats=_stats(shard_total=4, shard_alloc=3))
     assert n == 0
@@ -89,7 +89,7 @@ def test_check_and_notify_no_op_when_threshold_not_met(_isolated_nfs_root):
 def test_check_and_notify_fires_and_removes_when_threshold_met(_isolated_nfs_root):
     pn = _isolated_nfs_root
     pn.subscribe("alice", "alice@iit.lk", 2)
-    with patch("iitgpu.mailer.send_pod_available_notice") as send:
+    with patch("iitgpu.mailer.send_pod_available_notice", return_value=(True, "sent")) as send:
         n = pn.check_and_notify(stats=_stats(shard_total=4, shard_alloc=1))  # 3 free
     assert n == 1
     send.assert_called_once_with("alice", "alice@iit.lk", 3, 4, 2)
@@ -101,7 +101,7 @@ def test_check_and_notify_only_fires_subscriptions_whose_threshold_is_met(_isola
     pn = _isolated_nfs_root
     pn.subscribe("alice", "alice@iit.lk", 1)   # met (2 free)
     pn.subscribe("bob", "bob@iit.lk", 3)       # not met (2 free)
-    with patch("iitgpu.mailer.send_pod_available_notice") as send:
+    with patch("iitgpu.mailer.send_pod_available_notice", return_value=(True, "sent")) as send:
         n = pn.check_and_notify(stats=_stats(shard_total=4, shard_alloc=2))
     assert n == 1
     send.assert_called_once_with("alice", "alice@iit.lk", 2, 4, 1)
@@ -109,10 +109,39 @@ def test_check_and_notify_only_fires_subscriptions_whose_threshold_is_met(_isola
     assert pn.get_subscription("bob") is not None
 
 
+def test_check_and_notify_keeps_subscription_when_send_fails(_isolated_nfs_root):
+    """A failed mail send must not consume the user's one-time notification
+    -- they stay subscribed and get retried next cycle."""
+    pn = _isolated_nfs_root
+    pn.subscribe("alice", "alice@iit.lk", 1)
+    with patch("iitgpu.mailer.send_pod_available_notice",
+              return_value=(False, "mail disabled by an administrator")):
+        n = pn.check_and_notify(stats=_stats(shard_total=4, shard_alloc=2))
+    assert n == 0
+    assert pn.get_subscription("alice") is not None
+
+
+def test_check_and_notify_only_removes_subscriptions_that_actually_sent(_isolated_nfs_root):
+    """Mixed success/failure in the same batch: only the successful send's
+    subscription is removed."""
+    pn = _isolated_nfs_root
+    pn.subscribe("alice", "alice@iit.lk", 1)
+    pn.subscribe("bob", "bob@iit.lk", 1)
+
+    def _fake_send(username, email, free, total, wanted):
+        return (username == "alice", "sent" if username == "alice" else "failed")
+
+    with patch("iitgpu.mailer.send_pod_available_notice", side_effect=_fake_send):
+        n = pn.check_and_notify(stats=_stats(shard_total=4, shard_alloc=2))
+    assert n == 1
+    assert pn.get_subscription("alice") is None
+    assert pn.get_subscription("bob") is not None
+
+
 def test_check_and_notify_noop_on_unsharded_site(_isolated_nfs_root):
     pn = _isolated_nfs_root
     pn.subscribe("alice", "alice@iit.lk", 1)
-    with patch("iitgpu.mailer.send_pod_available_notice") as send:
+    with patch("iitgpu.mailer.send_pod_available_notice", return_value=(True, "sent")) as send:
         n = pn.check_and_notify(stats=_stats(shard_total=0, shard_alloc=0))
     assert n == 0
     send.assert_not_called()

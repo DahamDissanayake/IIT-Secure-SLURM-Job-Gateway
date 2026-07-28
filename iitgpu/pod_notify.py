@@ -114,15 +114,25 @@ def check_and_notify(stats=None) -> int:
     free = max(0, total - stats.shard_alloc)
 
     with _open_locked("r+") as f:
-        subs = _read(f)
-        if not subs:
-            return 0
-        fired = [s for s in subs if free >= s.get("wanted_pods", 1)]
-        if fired:
-            remaining = [s for s in subs if free < s.get("wanted_pods", 1)]
+        candidates = [s for s in _read(f) if free >= s.get("wanted_pods", 1)]
+    if not candidates:
+        return 0
+
+    # Send outside the lock (a slow/blocked mail send must not hold up
+    # subscribe/unsubscribe for the whole 2-minute cycle), then only remove
+    # the subscriptions that actually got delivered -- a failed send must
+    # not silently consume the user's one-time notification. Failures stay
+    # subscribed and are retried next cycle.
+    sent_usernames: set[str] = set()
+    for s in candidates:
+        ok, _msg = mailer.send_pod_available_notice(
+            s["username"], s["email"], free, total, s.get("wanted_pods", 1))
+        if ok:
+            sent_usernames.add(s["username"])
+
+    if sent_usernames:
+        with _open_locked("r+") as f:
+            remaining = [s for s in _read(f) if s.get("username") not in sent_usernames]
             _write(f, remaining)
 
-    for s in fired:
-        mailer.send_pod_available_notice(
-            s["username"], s["email"], free, total, s.get("wanted_pods", 1))
-    return len(fired)
+    return len(sent_usernames)

@@ -13,8 +13,20 @@ After=network.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/bin/iit-gpu-pod-notify
-# Must run as root -- see the script's own docstring: the audit daemon only
-# honours an explicit mail recipient for admin/root callers.
-User=root
+# Must be an admin identity (gpuadmins member), NOT literal root: the audit
+# daemon only honours an explicit mail recipient for admin/root callers, but
+# /shared has root_squash (NFS export), so an actual root process gets
+# mapped to the anonymous uid and can't read/write the subscriptions file.
+# Confirmed live: User=root failed with PermissionError on
+# /shared/.pod-notify-subscriptions.json.
+#
+# NOT slurmadmin or gpusync either, even though both carry the gpuadmins
+# GID on the login node: neither exists as a LOCAL account on the GPU host
+# (the NFS server), so the gpuadmins ACL grant on /shared doesn't resolve
+# for them over NFS -- confirmed live, both got PermissionError creating a
+# file at /shared top level despite `id` showing gpuadmins in their groups.
+# dahamadmin is provisioned identically (same uid/gid, gpuadmins member) on
+# BOTH nodes and was confirmed live to write successfully.
+User=dahamadmin
 StandardOutput=journal
 StandardError=journal
