@@ -30,6 +30,24 @@ def test_subscribe_then_get_subscription(_isolated_nfs_root):
     assert "subscribed_at" in sub
 
 
+def test_subscriptions_file_is_shared_writable_after_creation(_isolated_nfs_root, tmp_path):
+    """The subscriptions file is a single shared file every gateway user writes
+    (subscribe/unsubscribe), not a per-user file -- same convention as the
+    admin .mail-disabled flag file, but unlike that one, ANY user must be able
+    to write it, not just admins. Whoever creates it first must open access
+    for everyone else, same as every other shared-mutable-state file in this
+    codebase (see config.make_shared_writable)."""
+    pn = _isolated_nfs_root
+    pn.subscribe("alice", "alice@iit.lk", 2)
+    sub_file = tmp_path / ".pod-notify-subscriptions.json"
+    assert sub_file.exists()
+    mode = sub_file.stat().st_mode & 0o777
+    assert mode == 0o666, (
+        f"subscriptions file must be 0666 (world-writable) after creation so "
+        f"any user can subscribe, got {oct(mode)}"
+    )
+
+
 def test_get_subscription_none_when_not_subscribed(_isolated_nfs_root):
     assert _isolated_nfs_root.get_subscription("bob") is None
 

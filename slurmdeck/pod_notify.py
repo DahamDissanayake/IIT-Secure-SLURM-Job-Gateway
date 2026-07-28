@@ -38,6 +38,11 @@ def _open_locked(mode: str):
         try:
             with open(path, "x") as f:
                 f.write("[]")
+            # Single file shared by every gateway user (subscribe/unsubscribe),
+            # not per-user -- whoever creates it first must open write access
+            # for everyone else, same as every other shared-mutable-state file.
+            from slurmdeck.config import make_shared_writable
+            make_shared_writable(path)
         except FileExistsError:
             pass
     f = open(path, mode)
