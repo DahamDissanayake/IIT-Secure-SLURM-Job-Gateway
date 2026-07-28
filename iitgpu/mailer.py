@@ -479,3 +479,44 @@ def send_jupyter_extended(
 </table>
 </body></html>"""
     return _send_sync(to, subject, html, kind="jupyter_extended")
+
+
+def send_pod_available_notice(username: str, email: str, free: int, total: int,
+                              wanted_pods: int) -> tuple[bool, str]:
+    """One-time notice: the GPU now has at least as many pods free as this
+    user asked for (iitgpu.pod_notify.check_and_notify). Sent by the
+    pod-notify checker, which runs as root/admin so the daemon honours the
+    explicit `to` address instead of forcing it to the caller's own."""
+    subject = f"[{_cluster_name()}] GPU pods are free — {free}/{total} available"
+    accent  = "#22C55E"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F4F5;padding:40px 0">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%">
+  <tr><td bgcolor="{accent}" style="background:{accent};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
+  <tr><td bgcolor="#111827" style="background:#111827;padding:28px 32px 26px">
+    <p style="margin:0 0 20px;color:#4B5563;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase">{_cluster_name()}</p>
+    <h1 style="margin:0 0 8px;color:#F9FAFB;font-size:22px;font-weight:600;letter-spacing:-0.3px">GPU pods are free</h1>
+    <p style="margin:0;color:#9CA3AF;font-size:14px;line-height:1.6">You asked to be notified once at least <strong style="color:#86EFAC">{wanted_pods}</strong> pod(s) were free — <strong style="color:#86EFAC">{free}/{total}</strong> are free right now.</p>
+  </td></tr>
+  <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:28px 32px">
+    <div style="border-left:3px solid {accent};padding:14px 18px;background:#F0FDF4">
+      <p style="margin:0 0 6px;color:#166534;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">One-time notice</p>
+      <p style="margin:0;color:#166534;font-size:13px;line-height:1.7">This is a single notification — you will not be emailed again unless you subscribe from the Main Menu once more. Log in to <strong>iit-gpu-manager</strong> and submit your job before the pods fill back up.</p>
+    </div>
+  </td></tr>
+  <tr><td bgcolor="#F4F4F5" style="background:#F4F4F5;padding:18px 32px;border-top:1px solid #E4E4E7">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="color:#A1A1AA;font-size:11px">{_cluster_name()}&nbsp;&middot;&nbsp;{_now_lk()} (GMT+5:30)</td>
+        <td align="right" style="color:#A1A1AA;font-size:11px;font-family:monospace">iit-gpu-manager</td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>"""
+    return _send_sync(email, subject, html, kind="pod_available")

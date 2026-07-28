@@ -1,0 +1,10 @@
+[Unit]
+Description=Run iit-gpu-pod-notify every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=iit-gpu-pod-notify.service
+
+[Install]
+WantedBy=timers.target

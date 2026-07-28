@@ -95,6 +95,18 @@ if [ -f "$INSTALL/deploy/iit-gpu-mailer" ]; then
     ok "iit-gpu-mailer updated"
 fi
 
+# Sync the pod-notify checker (fired by iit-gpu-pod-notify.timer). NOTE: the
+# .service/.timer unit files themselves are NOT installed here -- that is a
+# manual one-time step (see deploy/iit-gpu-pod-notify.service header),
+# matching how sudoers-gateway-admin is also a manual install, not something
+# this script pushes on every deploy.
+if [ -f "$INSTALL/deploy/iit-gpu-pod-notify" ]; then
+    step "Syncing iit-gpu-pod-notify to /usr/local/bin ..."
+    sudo cp "$INSTALL/deploy/iit-gpu-pod-notify" /usr/local/bin/iit-gpu-pod-notify
+    sudo chmod 755 /usr/local/bin/iit-gpu-pod-notify
+    ok "iit-gpu-pod-notify updated"
+fi
+
 # Ensure the SlurmUser (`slurm`) can read the Resend key in secrets.env.
 # slurmctld runs MailProg as `slurm`, which must be in the gpusync group or
 # every job-completion email is silently dropped. Idempotent: only restart

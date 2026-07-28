@@ -220,3 +220,23 @@ def test_daemon_mail_allows_when_enabled(tmp_path, monkeypatch):
                         lambda *a, **k: {"ok": True})
     ok, msg = mailer._daemon_mail("a@b.com", "subj", "<p>hi</p>")
     assert ok is True
+
+
+# ── pod-available notice ────────────────────────────────────────────────────
+
+def test_pod_available_notice_recipient_and_kind():
+    ctx, store = _capture()
+    with ctx:
+        mailer.send_pod_available_notice("alice", "alice@iit.lk", 3, 4, 2)
+    assert store["to"] == "alice@iit.lk"
+    assert store["kind"] == "pod_available"
+
+
+def test_pod_available_notice_states_the_numbers_and_one_time_nature():
+    ctx, store = _capture()
+    with ctx:
+        mailer.send_pod_available_notice("alice", "alice@iit.lk", 3, 4, 2)
+    html = store["html"]
+    assert "3" in html and "4" in html and "2" in html
+    assert "One-time notice" in html
+    assert "not be emailed again" in html

@@ -1,0 +1,20 @@
+# DEPLOYMENT PREREQUISITE (manual, one time): redeploy-igm.sh syncs
+# /usr/local/bin/iit-gpu-pod-notify but does NOT install this unit file or
+# the .timer -- do that once with:
+#   sudo install -m 0644 deploy/iit-gpu-pod-notify.service /etc/systemd/system/
+#   sudo install -m 0644 deploy/iit-gpu-pod-notify.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now iit-gpu-pod-notify.timer
+[Unit]
+Description=IIT GPU pod-notify checker (one-shot, fired by the .timer)
+Documentation=https://github.com/DahamDissanayake/IIT-Secure-SLURM-Job-Gateway
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/iit-gpu-pod-notify
+# Must run as root -- see the script's own docstring: the audit daemon only
+# honours an explicit mail recipient for admin/root callers.
+User=root
+StandardOutput=journal
+StandardError=journal

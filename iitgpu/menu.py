@@ -9,6 +9,7 @@ _MAIN_ITEMS = [
     "2. My Workspace  (files, models, environments)",
     "3. Jobs          (queue, history, logs, rerun)",
     "4. Settings      (health check, shell, cluster status, hardware)",
+    "5. Notify When Free  (email me once enough GPU pods are free)",
 ]
 
 
@@ -45,7 +46,7 @@ def run_menu() -> None:
         screen("Main Menu")
         _choices = list(_MAIN_ITEMS)
         if _admin:
-            _choices.append("5. Admin         (cluster ops, users, audit)")
+            _choices.append("6. Admin         (cluster ops, users, audit)")
         choice = select_menu("Select an option:", _choices, back="Quit")
 
         if choice is None:
@@ -67,8 +68,77 @@ def run_menu() -> None:
             _settings_menu()
 
         elif choice.startswith("5."):
+            _notify_menu()
+
+        elif choice.startswith("6."):
             from iitgpu.admin import admin_menu
             admin_menu()
+
+
+def _notify_menu() -> None:
+    """Main Menu -> Notify When Free: subscribe to a one-time email once
+    enough GPU pods are free. Only offered while the GPU is fully occupied
+    -- if pods are already free there's nothing to wait for, so the screen
+    shows that instead of an editable subscription."""
+    import getpass
+    from iitgpu.slurm import get_node_stats
+    from iitgpu.ui import ok, err, screen
+
+    screen("Notify When Free")
+    stats = get_node_stats()
+    if stats is None or not stats.shard_total:
+        err("Cluster pod stats are unavailable right now — try again shortly.")
+        questionary.press_any_key_to_continue("").ask()
+        return
+
+    total = stats.shard_total
+    free = max(0, total - stats.shard_alloc)
+    username = getpass.getuser()
+
+    if free > 0:
+        info(f"[green]✓ {free}/{total} GPU pods are already free[/] — "
+             f"you can submit a job right now. Nothing to notify.")
+        questionary.press_any_key_to_continue("").ask()
+        return
+
+    from iitgpu import pod_notify
+    existing = pod_notify.get_subscription(username)
+
+    if existing:
+        info(f"You're subscribed — you'll get one email once at least "
+             f"[bold]{existing['wanted_pods']}[/] pod(s) are free.")
+        choice = select_menu(
+            "Notify When Free:", ["Change threshold", "Unsubscribe"], back=BACK_TO_MAIN)
+        if choice is None:
+            return
+        if choice == "Unsubscribe":
+            pod_notify.unsubscribe(username)
+            ok("Unsubscribed — you will not be notified.")
+            questionary.press_any_key_to_continue("").ask()
+            return
+        # "Change threshold" falls through to the subscribe flow below.
+
+    from iitgpu import daemonclient
+    email = daemonclient.email_for(username)
+    if not email:
+        err("No registered email on file for your account — ask an admin to "
+            "set one before subscribing.")
+        questionary.press_any_key_to_continue("").ask()
+        return
+
+    pod_choices = [f"{k} pod{'s' if k != 1 else ''}" for k in range(1, total + 1)]
+    sel = select_menu(
+        "Notify me once at least how many pods are free?", pod_choices, back=BACK_TO_MAIN)
+    if sel is None:
+        return
+    wanted = int(sel.split()[0])
+
+    if questionary.confirm(
+            f"Email {email} once {wanted}/{total} pod(s) are free (one-time notice)?",
+            default=True, style=STYLE).ask():
+        pod_notify.subscribe(username, email, wanted)
+        ok(f"Subscribed — you'll get one email once {wanted}/{total} pod(s) are free.")
+    questionary.press_any_key_to_continue("").ask()
 
 
 def _jobs_status() -> str:
