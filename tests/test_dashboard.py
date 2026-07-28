@@ -618,6 +618,28 @@ def test_resource_status_line_is_the_public_name_for_the_verdict():
     assert "slices free" in line
 
 
+def test_pod_blocks_shows_one_glyph_per_pod_occupied_first():
+    from iitgpu.splash import _pod_blocks
+
+    assert _pod_blocks(free=0, total=4) == "[red]■[/] [red]■[/] [red]■[/] [red]■[/]"
+    assert _pod_blocks(free=4, total=4) == "[green]□[/] [green]□[/] [green]□[/] [green]□[/]"
+    assert _pod_blocks(free=2, total=4) == (
+        "[red]■[/] [red]■[/] [green]□[/] [green]□[/]"
+    )
+
+
+def test_resource_status_line_includes_pod_blocks_matching_free_count():
+    from iitgpu.splash import resource_status_line
+
+    stats = SimpleNamespace(
+        cpu_total=32, cpu_alloc=8, mem_total_mb=61440, mem_alloc_mb=8192,
+        shard_total=4, shard_alloc=2, gpu_total=1, gpu_alloc=0,
+    )
+    line = resource_status_line(stats)
+    assert line.count("■") == 2   # 2 occupied
+    assert line.count("□") == 2   # 2 free
+
+
 # ── CANCELLED state display ───────────────────────────────────────────────────
 
 def test_jobs_table_cancelled_not_shown_as_failed():

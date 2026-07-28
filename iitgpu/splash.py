@@ -81,6 +81,14 @@ def show_splash(pause: float = 1.5) -> None:
         time.sleep(pause)
 
 
+def _pod_blocks(free: int, total: int) -> str:
+    """One glyph per pod: a hollow green square for free, a filled red square
+    for occupied. Colour alone isn't accessible (colourblind users, some
+    terminals) so shape carries the same signal redundantly."""
+    occupied = max(0, total - free)
+    return " ".join(["[red]■[/]"] * occupied + ["[green]□[/]"] * free)
+
+
 def resource_status_line(stats) -> str:
     """Free GPU/CPU/RAM + a plain-language verdict on whether another job can start now.
 
@@ -96,12 +104,13 @@ def resource_status_line(stats) -> str:
     mem_free_gb = max(0.0, (stats.mem_total_mb - stats.mem_alloc_mb) / 1024)
     cpu_ram = f"[dim]CPU {cpu_free}/{stats.cpu_total} free · RAM {mem_free_gb:.0f}GB free[/]"
 
-    # The GPU is split into slices, so what matters is how many slices are left,
-    # not whether the card is "in use" — several jobs share it.
+    # The GPU is split into slices (pods), so what matters is how many are
+    # left, not whether the card is "in use" — several jobs share it.
     if stats.shard_total:
         free = max(0, stats.shard_total - stats.shard_alloc)
+        pods = _pod_blocks(free, stats.shard_total)
         color = "green" if free > 0 else "yellow"
-        counts = f"[{color}]GPU {free}/{stats.shard_total} slices free[/]  {cpu_ram}"
+        counts = f"{pods}  [{color}]GPU {free}/{stats.shard_total} slices free[/]  {cpu_ram}"
         if free > 0:
             verdict = f"[bold green]OK to submit — room for {free} more GPU job(s)[/]"
         elif cpu_free > 0 and mem_free_gb > 0:
