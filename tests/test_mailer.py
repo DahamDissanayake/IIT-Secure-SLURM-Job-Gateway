@@ -57,6 +57,14 @@ def test_welcome_recipient_and_kind():
     assert store["kind"] == "welcome"
 
 
+def test_welcome_explains_gpu_pods():
+    ctx, store = _capture()
+    with ctx:
+        mailer.send_welcome("alice", "alice@iit.lk", "Alice")
+    assert "Using the Shared GPU (Pods)" in store["html"]
+    assert "pods" in store["html"].lower()
+
+
 def test_welcome_includes_password_when_given():
     ctx, store = _capture()
     with ctx:

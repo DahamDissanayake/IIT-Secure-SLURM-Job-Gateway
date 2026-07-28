@@ -191,6 +191,12 @@ def send_welcome(username: str, email: str, full_name: str = "",
             </ol>
           </div>
 
+          <div style="margin-top:24px;border-left:3px solid #8B5CF6;padding:14px 18px;background:#F5F3FF">
+            <p style="margin:0 0 6px;color:#6D28D9;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">Using the Shared GPU (Pods)</p>
+            <p style="margin:0 0 8px;color:#5B21B6;font-size:13px;line-height:1.7">The cluster's GPU is split into shared <strong>pods</strong> so several people can run jobs at the same time. When you launch a job — a JupyterLab notebook, a training script, or a shell — you'll pick how many pods it needs: more pods means more GPU/CPU/RAM for your job, but a longer wait if the cluster is busy.</p>
+            <p style="margin:0;color:#5B21B6;font-size:13px;line-height:1.7">The Main Menu always shows how many pods are free before you submit, and the review screen shows exactly what your job will get before you launch it — so there's never a surprise.</p>
+          </div>
+
           <div style="margin-top:24px;padding:16px 20px;background:#F9FAFB;border-radius:6px;border:1px solid #E5E7EB">
             <p style="margin:0 0 4px;color:#111827;font-size:13px;font-weight:600">Need help?</p>
             <p style="margin:0;color:#6B7280;font-size:13px;line-height:1.6">For assistance with your account, job submissions, or any cluster questions, contact the <strong>IIT Research Team</strong>.</p>
