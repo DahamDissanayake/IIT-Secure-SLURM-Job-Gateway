@@ -30,7 +30,7 @@ Follow `deploy/setup-slurmdbd.md` in order:
 5. Restart `slurmctld` / `slurmd`
 
 After completion the TUI will auto-detect `sacct` and use it for job history.
-Set `SACCT_ENABLED=0` in `/usr/local/bin/iit-gpu-manager` to force file-scan fallback.
+Set `SACCT_ENABLED=0` in `/usr/local/bin/slurm-deck` to force file-scan fallback.
 
 ---
 
@@ -40,19 +40,19 @@ Set `SACCT_ENABLED=0` in `/usr/local/bin/iit-gpu-manager` to force file-scan fal
 
 ```bash
 # Copy writer and service from the login node
-scp slurmadmin@192.168.122.10:/home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/iit-gpu-stats-writer \
-    /usr/local/bin/iit-gpu-stats-writer
-chmod +x /usr/local/bin/iit-gpu-stats-writer
+scp slurmadmin@192.168.122.10:/home/slurmadmin/slurm-deck/deploy/slurm-deck-stats-writer \
+    /usr/local/bin/slurm-deck-stats-writer
+chmod +x /usr/local/bin/slurm-deck-stats-writer
 
-scp slurmadmin@192.168.122.10:/home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/iit-gpu-stats.service \
-    /etc/systemd/system/iit-gpu-stats.service
+scp slurmadmin@192.168.122.10:/home/slurmadmin/slurm-deck/deploy/slurm-deck-stats.service \
+    /etc/systemd/system/slurm-deck-stats.service
 
 # Enable and start
 sudo systemctl daemon-reload
-sudo systemctl enable --now iit-gpu-stats
+sudo systemctl enable --now slurm-deck-stats
 
 # Verify
-sudo systemctl status iit-gpu-stats
+sudo systemctl status slurm-deck-stats
 ```
 
 After ~5 seconds verify the stats file is fresh:
@@ -64,15 +64,15 @@ python3 -c "import json; d=json.load(open('/shared/.gpu_stats.json')); print(d)"
 ### [GPU-HOST] Remove the old @reboot cron entry (if present)
 
 ```bash
-crontab -l | grep -v "iit-gpu-stats-writer" | crontab -
+crontab -l | grep -v "slurm-deck-stats-writer" | crontab -
 ```
 
 ### [GPU-HOST] Test crash recovery
 
 ```bash
-sudo systemctl kill iit-gpu-stats
+sudo systemctl kill slurm-deck-stats
 sleep 5
-sudo systemctl status iit-gpu-stats   # should show Active: active (running)
+sudo systemctl status slurm-deck-stats   # should show Active: active (running)
 ```
 
 ---
@@ -106,7 +106,7 @@ sudo chmod 0775 /shared/images
 ### [GPU-HOST] Build prebuilt images (see deploy/build-images.md)
 
 ```bash
-cd /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway
+cd /home/slurmadmin/slurm-deck
 for img in llm-finetune llm-serve vision diffusion data-science; do
     sudo apptainer build /shared/images/${img}.sif deploy/images/${img}.def
 done
@@ -137,7 +137,7 @@ Or manually:
 CONDA=/shared/miniforge3/bin/conda
 for name in llm-finetune llm-serve vision diffusion data-science; do
     $CONDA env create -p /shared/envs/${name} \
-        -f /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/envs/specs/${name}.yml \
+        -f /home/slurmadmin/slurm-deck/envs/specs/${name}.yml \
         --force
 done
 ```
@@ -184,11 +184,11 @@ If an MTA is installed, add to sbatch scripts or the TUI template:
 
 - [ ] Phase 1: `setup-compute-toolchain.sh` run on GPU host
 - [ ] Phase 2: `slurmdbd` installed, `sacct` working, QOS added
-- [ ] Phase 3: `iit-gpu-stats` systemd service active and producing fresh JSON
+- [ ] Phase 3: `slurm-deck-stats` systemd service active and producing fresh JSON
 - [ ] Phase 3: Old `@reboot` cron entry removed
 - [ ] Phase 4: Apptainer installed on both nodes; `/shared/images/` created
 - [ ] Phase 4: Prebuilt `.sif` images built and verified (`nvidia-smi` inside container)
 - [ ] Phase 6: Conda specs installed via `conda env create`
 - [ ] Phase 7: `gpuusers` group created on both nodes; SLURM user added
-- [ ] All tests pass: `PYTHONPATH=/opt/iit-gpu python3 -m pytest /opt/iit-gpu/tests/ -q`
-- [ ] `redeploy-igm.sh` runs end-to-end from login node
+- [ ] All tests pass: `PYTHONPATH=/opt/slurm-deck python3 -m pytest /opt/slurm-deck/tests/ -q`
+- [ ] `redeploy-slurm-deck.sh` runs end-to-end from login node

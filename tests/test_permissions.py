@@ -5,11 +5,11 @@ The cluster's NFS export uses root_squash. setgid IS inherited normally on
 /shared (an earlier note here claimed otherwise; that was a measurement
 artifact of this host's `mkdir` binary -- uutils coreutils 0.8.0 --
 mishandling ACL-bearing parent directories, not a real filesystem
-limitation -- see iitgpu/jobs.py make_job_folder for the live comparison),
+limitation -- see slurmdeck/jobs.py make_job_folder for the live comparison),
 but it only sets a new file's group to match its parent directory's owning
 group -- it doesn't grant write access to arbitrary gpuusers members outside
 that group. ACLs do work on /shared -- deploy/fix-shared-perms.sh and
-deploy/iit-gpu-adduser.sh apply a gpuadmins ACL to each user's own job/model
+deploy/slurm-deck-adduser.sh apply a gpuadmins ACL to each user's own job/model
 directories -- but the installer has no equivalent per-file ACL step for
 shared registry/template files, so group-based sharing can't be set up for
 those. Whoever creates a shared registry/template makes it world-writable
@@ -20,7 +20,7 @@ import os
 import stat
 from unittest.mock import patch
 
-from iitgpu.config import load_config, make_shared_writable
+from slurmdeck.config import load_config, make_shared_writable
 
 
 def _mode(p):
@@ -50,9 +50,9 @@ def test_make_shared_writable_missing_path_is_silent(tmp_path):
 def test_model_registry_is_world_writable(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
     (tmp_path / "models").mkdir()
-    from iitgpu.models import ModelEntry, register_model, _registry_path
+    from slurmdeck.models import ModelEntry, register_model, _registry_path
     cfg = load_config()
-    with patch("iitgpu.models.auditclient"):
+    with patch("slurmdeck.models.auditclient"):
         register_model(cfg, ModelEntry(
             name="m", source="huggingface", path="/x",
             added_at="t", added_by="u", size_mb=1,
@@ -63,7 +63,7 @@ def test_model_registry_is_world_writable(tmp_path, monkeypatch):
 def test_env_registry_is_world_writable(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
     (tmp_path / "models").mkdir()
-    from iitgpu.envs import EnvEntry, _save_venv_registry, _envs_registry_path
+    from slurmdeck.envs import EnvEntry, _save_venv_registry, _envs_registry_path
     cfg = load_config()
     _save_venv_registry(cfg, [EnvEntry(name="e", kind="conda", path="/x")])
     assert _mode(_envs_registry_path(cfg)) == 0o666

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-PKG_DIR = REPO_ROOT / "iitgpu"
+PKG_DIR = REPO_ROOT / "slurmdeck"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
 INSTALL_SH = REPO_ROOT / "deploy" / "install.sh"
 
@@ -30,7 +30,7 @@ def _stdlib_names():
 
 
 def _imported_top_level_modules():
-    """All top-level modules imported anywhere under iitgpu/ (incl. nested)."""
+    """All top-level modules imported anywhere under slurmdeck/ (incl. nested)."""
     mods = set()
     for py in PKG_DIR.rglob("*.py"):
         tree = ast.parse(py.read_text(), filename=str(py))
@@ -61,7 +61,7 @@ def test_all_third_party_imports_are_declared():
     declared = _declared_requirements()
     third_party = {
         m for m in _imported_top_level_modules()
-        if m not in stdlib and m != "iitgpu"
+        if m not in stdlib and m != "slurmdeck"
     }
     missing = {m for m in third_party if _NORMALISE(m) not in declared}
     assert not missing, (

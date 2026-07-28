@@ -7,12 +7,12 @@ import pytest
 
 
 def test_framework_packages_contains_pytorch():
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     assert "pytorch-2.5" in FRAMEWORK_PACKAGES
 
 
 def test_framework_packages_contains_pytorch_26():
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES, FRAMEWORK_LABELS
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES, FRAMEWORK_LABELS
     assert "pytorch-2.7" in FRAMEWORK_PACKAGES
     assert "pytorch-2.7" in FRAMEWORK_LABELS
     pkg = " ".join(FRAMEWORK_PACKAGES["pytorch-2.7"])
@@ -21,22 +21,22 @@ def test_framework_packages_contains_pytorch_26():
 
 
 def test_pytorch_26_is_first_in_labels():
-    from iitgpu.envbuilder import FRAMEWORK_LABELS
+    from slurmdeck.envbuilder import FRAMEWORK_LABELS
     assert list(FRAMEWORK_LABELS.keys())[0] == "pytorch-2.7"
 
 
 def test_framework_packages_contains_tensorflow():
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     assert "tensorflow-2.18" in FRAMEWORK_PACKAGES
 
 
 def test_framework_packages_contains_jax():
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     assert "jax-0.4" in FRAMEWORK_PACKAGES
 
 
 def test_framework_packages_contains_bare():
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     assert "bare" in FRAMEWORK_PACKAGES
     assert FRAMEWORK_PACKAGES["bare"] == []
 
@@ -44,9 +44,9 @@ def test_framework_packages_contains_bare():
 def test_build_env_returns_false_when_conda_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
     with patch("shutil.which", return_value=None), \
-         patch("iitgpu.envbuilder._find_conda", return_value=None):
-        from iitgpu.envbuilder import build_env
-        from iitgpu.config import load_config
+         patch("slurmdeck.envbuilder._find_conda", return_value=None):
+        from slurmdeck.envbuilder import build_env
+        from slurmdeck.config import load_config
         success, path = build_env("testenv", "pytorch-2.5", None, load_config())
     assert success is False
     assert path == ""
@@ -62,9 +62,9 @@ def test_build_env_success_calls_conda_create(tmp_path, monkeypatch):
         return 0, []
 
     with patch("shutil.which", return_value="/usr/bin/conda"), \
-         patch("iitgpu.envbuilder._run_with_progress", side_effect=fake_progress):
-        from iitgpu.envbuilder import build_env
-        from iitgpu.config import load_config
+         patch("slurmdeck.envbuilder._run_with_progress", side_effect=fake_progress):
+        from slurmdeck.envbuilder import build_env
+        from slurmdeck.config import load_config
         success, path = build_env("testenv", "bare", None, load_config())
 
     assert success is True
@@ -74,15 +74,15 @@ def test_build_env_success_calls_conda_create(tmp_path, monkeypatch):
 def test_build_env_unknown_framework_returns_false(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
     with patch("shutil.which", return_value="/usr/bin/conda"):
-        from iitgpu.envbuilder import build_env
-        from iitgpu.config import load_config
+        from slurmdeck.envbuilder import build_env
+        from slurmdeck.config import load_config
         success, path = build_env("testenv", "unknown_framework_xyz", None, load_config())
     assert success is False
 # Additional tests for Phase 1 — appended to test_envbuilder.py
 
 def test_cu128_index_in_pytorch27_packages():
     """pytorch-2.7 must use cu128 index (the only one with sm_120 wheels)."""
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     pkg_str = " ".join(FRAMEWORK_PACKAGES["pytorch-2.7"])
     assert "https://download.pytorch.org/whl/cu128" in pkg_str, (
         "pytorch-2.7 must use cu128 index — cu126/cu124 lack sm_120 kernels"
@@ -91,7 +91,7 @@ def test_cu128_index_in_pytorch27_packages():
 
 def test_pytorch27_pins_version_27_or_higher():
     """pytorch-2.7 entry must pin torch>=2.7 (first sm_120-capable release)."""
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     pkg_str = " ".join(FRAMEWORK_PACKAGES["pytorch-2.7"])
     # Accept torch==2.7.* or torch>=2.7
     assert "torch==2.7" in pkg_str or "torch>=2.7" in pkg_str, (
@@ -101,7 +101,7 @@ def test_pytorch27_pins_version_27_or_higher():
 
 def test_no_old_cuda_index_in_pytorch27():
     """pytorch-2.7 must NOT reference cu121, cu124, or cu126."""
-    from iitgpu.envbuilder import FRAMEWORK_PACKAGES
+    from slurmdeck.envbuilder import FRAMEWORK_PACKAGES
     pkg_str = " ".join(FRAMEWORK_PACKAGES["pytorch-2.7"])
     for bad in ("cu121", "cu124", "cu126", "cu131"):
         assert bad not in pkg_str, (
@@ -113,7 +113,7 @@ def test_smoke_check_skips_gracefully_when_no_cuda(tmp_path):
     """_smoke_check_pytorch returns True and warns when CUDA is not available."""
     import subprocess
     from unittest.mock import patch, MagicMock
-    from iitgpu.envbuilder import _smoke_check_pytorch
+    from slurmdeck.envbuilder import _smoke_check_pytorch
 
     no_gpu_output = "  torch 2.7.0\n  cuda available: False\n  [SKIP] no GPU on this node -- GPU smoke check skipped\n"
     mock_result = MagicMock()
@@ -130,7 +130,7 @@ def test_smoke_check_returns_false_on_wrong_capability(tmp_path):
     """_smoke_check_pytorch returns False when the device is below sm_120."""
     import subprocess
     from unittest.mock import patch, MagicMock
-    from iitgpu.envbuilder import _smoke_check_pytorch
+    from slurmdeck.envbuilder import _smoke_check_pytorch
 
     mock_result = MagicMock()
     mock_result.returncode = 2
@@ -146,7 +146,7 @@ def test_smoke_check_returns_true_on_sm120(tmp_path):
     """_smoke_check_pytorch returns True when capability is (12, 0)."""
     import subprocess
     from unittest.mock import patch, MagicMock
-    from iitgpu.envbuilder import _smoke_check_pytorch
+    from slurmdeck.envbuilder import _smoke_check_pytorch
 
     mock_result = MagicMock()
     mock_result.returncode = 0
@@ -168,7 +168,7 @@ def test_smoke_check_timeout_is_nonfatal():
     """A timeout in the smoke check is treated as a skip, not a failure."""
     import subprocess
     from unittest.mock import patch
-    from iitgpu.envbuilder import _smoke_check_pytorch
+    from slurmdeck.envbuilder import _smoke_check_pytorch
 
     with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="python3", timeout=120)):
         result = _smoke_check_pytorch("/fake/env/bin/python3", {})
@@ -192,12 +192,12 @@ def test_build_env_pytorch_triggers_smoke_check(tmp_path, monkeypatch):
         return True  # pass
 
     with patch("shutil.which", return_value="/usr/bin/conda"), \
-         patch("iitgpu.envbuilder._find_conda", return_value="/usr/bin/conda"), \
-         patch("iitgpu.envbuilder._run_with_progress", side_effect=fake_progress), \
-         patch("iitgpu.envbuilder._run_pip_with_progress", side_effect=fake_pip_progress), \
-         patch("iitgpu.envbuilder._smoke_check_pytorch", side_effect=fake_smoke):
-        from iitgpu.envbuilder import build_env
-        from iitgpu.config import load_config
+         patch("slurmdeck.envbuilder._find_conda", return_value="/usr/bin/conda"), \
+         patch("slurmdeck.envbuilder._run_with_progress", side_effect=fake_progress), \
+         patch("slurmdeck.envbuilder._run_pip_with_progress", side_effect=fake_pip_progress), \
+         patch("slurmdeck.envbuilder._smoke_check_pytorch", side_effect=fake_smoke):
+        from slurmdeck.envbuilder import build_env
+        from slurmdeck.config import load_config
         success, path = build_env("testenv", "pytorch-2.7", None, load_config())
 
     assert success is True
@@ -218,11 +218,11 @@ def test_build_env_bare_skips_smoke_check(tmp_path, monkeypatch):
         return True
 
     with patch("shutil.which", return_value="/usr/bin/conda"), \
-         patch("iitgpu.envbuilder._find_conda", return_value="/usr/bin/conda"), \
-         patch("iitgpu.envbuilder._run_with_progress", side_effect=fake_progress), \
-         patch("iitgpu.envbuilder._smoke_check_pytorch", side_effect=fake_smoke):
-        from iitgpu.envbuilder import build_env
-        from iitgpu.config import load_config
+         patch("slurmdeck.envbuilder._find_conda", return_value="/usr/bin/conda"), \
+         patch("slurmdeck.envbuilder._run_with_progress", side_effect=fake_progress), \
+         patch("slurmdeck.envbuilder._smoke_check_pytorch", side_effect=fake_smoke):
+        from slurmdeck.envbuilder import build_env
+        from slurmdeck.config import load_config
         success, path = build_env("testenv", "bare", None, load_config())
 
     assert success is True
@@ -232,7 +232,7 @@ def test_build_env_bare_skips_smoke_check(tmp_path, monkeypatch):
 # ── live pip-phase gauge (frozen-bar fix) ──────────────────────────────────────
 
 def test_count_site_packages_counts_dist_info(tmp_path):
-    from iitgpu.envbuilder import _count_site_packages
+    from slurmdeck.envbuilder import _count_site_packages
     sp = tmp_path / "lib" / "python3.11" / "site-packages"
     sp.mkdir(parents=True)
     (sp / "numpy-2.0.dist-info").mkdir()
@@ -243,7 +243,7 @@ def test_count_site_packages_counts_dist_info(tmp_path):
 
 
 def test_count_site_packages_missing_env_returns_zero(tmp_path):
-    from iitgpu.envbuilder import _count_site_packages
+    from slurmdeck.envbuilder import _count_site_packages
     assert _count_site_packages(str(tmp_path / "does-not-exist")) == 0
 
 
@@ -251,7 +251,7 @@ def test_run_with_progress_dedupes_pip_spinner_and_completes(tmp_path):
     """conda's silent pip step floods stdout with an identical spinner line;
     _run_with_progress must collapse consecutive duplicates and still finish
     cleanly when pip_watch_dir is set (the frozen-bar fix path)."""
-    from iitgpu.envbuilder import _run_with_progress, _CONDA_PHASES
+    from slurmdeck.envbuilder import _run_with_progress, _CONDA_PHASES
     script = (
         "for line in ["
         "'Collecting package metadata',"
@@ -281,7 +281,7 @@ def test_run_with_progress_shows_live_count_after_final_phase(tmp_path, monkeypa
     After 'Executing transaction', the bar must show a live package count."""
     import io
     from rich.console import Console
-    from iitgpu import envbuilder
+    from slurmdeck import envbuilder
 
     sp = tmp_path / "lib" / "python3.11" / "site-packages"
     sp.mkdir(parents=True)

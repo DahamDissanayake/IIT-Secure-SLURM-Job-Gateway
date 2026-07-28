@@ -76,7 +76,7 @@ def test_log_sends_three_events(tmp_path, monkeypatch):
     t = _start_stub_server(sock_path, received, stop)
     time.sleep(0.05)
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     ac.log("job_submit",  detail="test1", job_id="J001")
@@ -112,7 +112,7 @@ def test_log_includes_meta(tmp_path, monkeypatch):
     t = _start_stub_server(sock_path, received, stop)
     time.sleep(0.05)
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     ac.log("job_submit", meta={"run_command": "python train.py",
@@ -132,7 +132,7 @@ def test_log_spools_when_socket_missing(tmp_path, monkeypatch):
     spool_dir = tmp_path / "spool"
     monkeypatch.setenv("AUDIT_SPOOL", str(spool_dir))
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log("test_action", detail="spooled", job_id="J999")
@@ -152,7 +152,7 @@ def test_log_or_block_spools_when_socket_missing(tmp_path, monkeypatch):
     spool_dir = tmp_path / "spool"
     monkeypatch.setenv("AUDIT_SPOOL", str(spool_dir))
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log_or_block("job_submit", detail="no_daemon")
@@ -169,7 +169,7 @@ def test_log_or_block_fails_open_when_infrastructure_down(tmp_path, monkeypatch)
     blocker.write_text("x")
     monkeypatch.setenv("AUDIT_SPOOL", str(blocker))
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log_or_block("job_submit", detail="blocked")
@@ -227,7 +227,7 @@ def test_daemon_request_returns_response(tmp_path, monkeypatch):
     t = _start_echo_server(sock_path, stop)
     time.sleep(0.05)
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     resp = ac.daemon_request("users.list", {})
@@ -243,7 +243,7 @@ def test_daemon_request_returns_response(tmp_path, monkeypatch):
 def test_daemon_request_returns_error_on_no_daemon(tmp_path, monkeypatch):
     monkeypatch.setenv("AUDIT_SOCKET", str(tmp_path / "no.sock"))
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     resp = ac.daemon_request("users.list", {})
@@ -300,7 +300,7 @@ def test_log_or_block_returns_true_when_daemon_accepts(tmp_path, monkeypatch):
     _start_response_server(sock_path, {"ok": True}, stop)
     time.sleep(0.05)
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log_or_block("job_submit", detail="train.py")
@@ -320,7 +320,7 @@ def test_log_or_block_returns_false_when_daemon_rate_limits(tmp_path, monkeypatc
                            stop)
     time.sleep(0.05)
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log_or_block("job_submit", detail="train.py")
@@ -333,7 +333,7 @@ def test_log_or_block_returns_true_when_daemon_unreachable(tmp_path, monkeypatch
     monkeypatch.setenv("AUDIT_SOCKET", str(tmp_path / "no.sock"))
     monkeypatch.setenv("AUDIT_SPOOL",  str(tmp_path / "spool"))
 
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     result = ac.log_or_block("job_submit", detail="train.py")

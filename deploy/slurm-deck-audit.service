@@ -1,0 +1,20 @@
+[Unit]
+Description=Slurm Deck Audit Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=gpusync
+ExecStart=/usr/bin/python3 /opt/slurm-deck/deploy/audit_daemon.py
+Restart=always
+RestartSec=5
+RuntimeDirectory=slurm-deck
+StateDirectory=slurm-deck
+Environment=AUDIT_SOCKET=/run/slurm-deck/audit.sock
+Environment=AUDIT_SPOOL=/run/slurm-deck/spool
+Environment=AUDIT_STATE=/var/lib/slurm-deck
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

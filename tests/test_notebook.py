@@ -7,13 +7,13 @@ import pytest
 # ── Task defaults ─────────────────────────────────────────────────────────────
 
 def test_notebook_in_task_pod_defaults():
-    from iitgpu.jobs import TASK_POD_DEFAULTS
+    from slurmdeck.jobs import TASK_POD_DEFAULTS
     assert "notebook" in TASK_POD_DEFAULTS
 
 
 def test_notebook_defaults_correct():
-    from iitgpu.jobs import resource_defaults
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.jobs import resource_defaults
+    from slurmdeck.slurm import NodeStats
     stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                       mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=4, shard_alloc=0)
@@ -27,7 +27,7 @@ def test_notebook_defaults_correct():
 # ── render_notebook_sbatch ────────────────────────────────────────────────────
 
 def _nb_spec(**kwargs):
-    from iitgpu.jobs import JobSpec
+    from slurmdeck.jobs import JobSpec
     defaults = dict(
         job_name="notebook",
         partition="gpu",
@@ -43,14 +43,14 @@ def _nb_spec(**kwargs):
 
 
 def test_notebook_sbatch_has_jupyter_launch(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888)
     assert "jupyter lab" in script
     assert "--no-browser" in script
-    assert "--ip=$IIT_NODE_ADDR" in script
-    assert "--port=$IIT_PORT --port-retries=0" in script
+    assert "--ip=$SD_NODE_ADDR" in script
+    assert "--port=$SD_PORT --port-retries=0" in script
 
 
 def test_notebook_sbatch_binds_to_node_addr_not_loopback(tmp_path):
@@ -59,23 +59,23 @@ def test_notebook_sbatch_binds_to_node_addr_not_loopback(tmp_path):
     made Jupyter unreachable through the tunnel. It must bind to the node's
     SLURM NodeAddr (routable from the gateway) and forward the tunnel there,
     never to loopback or the public-facing 0.0.0.0."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888)
     # Resolves the node's reachable address at runtime …
-    assert "IIT_NODE_ADDR=" in script
+    assert "SD_NODE_ADDR=" in script
     assert "NodeAddr=" in script
     # … binds the server to it …
-    assert "--ip=$IIT_NODE_ADDR" in script
+    assert "--ip=$SD_NODE_ADDR" in script
     # … and the tunnel forwards to that address, not localhost.
-    assert "-L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT" in script
+    assert "-L $SD_PORT:$SD_NODE_ADDR:$SD_PORT" in script
     # Never exposed on all interfaces (public network).
     assert "0.0.0.0" not in script
 
 
 def test_notebook_sbatch_prints_ssh_tunnel_hint(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888,
@@ -87,7 +87,7 @@ def test_notebook_sbatch_prints_ssh_tunnel_hint(tmp_path):
 
 
 def test_notebook_sbatch_token_generated_at_runtime(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -97,7 +97,7 @@ def test_notebook_sbatch_token_generated_at_runtime(tmp_path):
 
 
 def test_notebook_sbatch_uses_conda_env(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(conda_env="/shared/envs/pytorch-2.7")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -106,7 +106,7 @@ def test_notebook_sbatch_uses_conda_env(tmp_path):
 
 
 def test_notebook_sbatch_uses_container_image(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(container_image="/shared/images/data-science.sif")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -116,7 +116,7 @@ def test_notebook_sbatch_uses_container_image(tmp_path):
 
 
 def test_notebook_sbatch_custom_port(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=9000)
@@ -125,7 +125,7 @@ def test_notebook_sbatch_custom_port(tmp_path):
 
 
 def test_notebook_sbatch_has_sbatch_directives(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -138,7 +138,7 @@ def test_notebook_sbatch_has_sbatch_directives(tmp_path):
 def test_notebook_sbatch_self_heals_missing_jupyter(tmp_path):
     """A chosen env without JupyterLab must self-heal, not die with
     'jupyter: command not found' (the original notebook-job failure)."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(conda_env="/shared/envs/pytorch-2.7")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -150,7 +150,7 @@ def test_notebook_sbatch_self_heals_missing_jupyter(tmp_path):
 
 def test_notebook_sbatch_no_self_heal_for_container(tmp_path):
     """Container images are expected to ship Jupyter; no pip self-heal there."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(container_image="/shared/images/data-science.sif")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -158,7 +158,7 @@ def test_notebook_sbatch_no_self_heal_for_container(tmp_path):
 
 
 def test_notebook_sbatch_emits_mail_directives_when_mail_user_set(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(mail_user="dahamadmin@iit.ac.lk")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -167,7 +167,7 @@ def test_notebook_sbatch_emits_mail_directives_when_mail_user_set(tmp_path):
 
 
 def test_notebook_sbatch_no_mail_directives_without_mail_user(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -175,7 +175,7 @@ def test_notebook_sbatch_no_mail_directives_without_mail_user(tmp_path):
 
 
 def test_tensorboard_sbatch_emits_mail_directives_when_mail_user_set(tmp_path):
-    from iitgpu.jobs import JobSpec, make_job_folder, render_tensorboard_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_tensorboard_sbatch
     spec = JobSpec(job_name="tensorboard", partition="gpu", gpu_shards=0, cpus=2,
                    mem_gb=8, time_limit="08:00:00", run_command="",
                    task_type="tensorboard", mail_user="dahamadmin@iit.ac.lk")
@@ -187,9 +187,9 @@ def test_tensorboard_sbatch_emits_mail_directives_when_mail_user_set(tmp_path):
 
 def test_notebook_sbatch_tunnel_uses_dash_N(tmp_path):
     """-N flag must appear in the printed tunnel command so running it does not
-    launch the TUI — without -N the SSH session auto-starts iit-gpu-manager and
+    launch the TUI — without -N the SSH session auto-starts slurm-deck and
     the user sees the TUI instead of an idle tunnel."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888,
@@ -201,7 +201,7 @@ def test_notebook_sbatch_tunnel_uses_dash_N(tmp_path):
 def test_notebook_sbatch_prints_token_explicitly(tmp_path):
     """Token must be echoed before JupyterLab starts so users can copy it from
     the job log without hunting through JupyterLab verbose startup output."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -213,16 +213,16 @@ def test_notebook_sbatch_prints_token_explicitly(tmp_path):
 def test_notebook_sbatch_prints_full_lab_url_with_token(tmp_path):
     """The browser URL must include /lab?token= so users can paste it directly.
     http://127.0.0.1:<port> alone requires a separate token step."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder, port=8888)
     assert "/lab?token=$JUPYTER_TOKEN" in script
-    assert "http://127.0.0.1:$IIT_PORT/lab?token=$JUPYTER_TOKEN" in script
+    assert "http://127.0.0.1:$SD_PORT/lab?token=$JUPYTER_TOKEN" in script
 
 
 def test_notebook_sbatch_uses_identity_provider_token(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
@@ -235,28 +235,28 @@ def test_notebook_sbatch_terminal_opens_in_user_own_folder(tmp_path):
     but JupyterLab terminals spawn in the server process's cwd, not root_dir.
     #SBATCH --chdir points the process at the job's per-run folder, so without
     an explicit cd, terminals opened there instead of the user's own space
-    (reported live). The script must cd into IIT_USER_ROOT before launch."""
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    (reported live). The script must cd into SD_USER_ROOT before launch."""
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
-    assert 'cd "$IIT_USER_ROOT"' in script
-    # Must happen after IIT_USER_ROOT is defined/created, and before launch.
-    assert script.index('IIT_USER_ROOT="/shared/users/$USER"') < script.index('cd "$IIT_USER_ROOT"')
-    assert script.index('cd "$IIT_USER_ROOT"') < script.index("jupyter lab")
+    assert 'cd "$SD_USER_ROOT"' in script
+    # Must happen after SD_USER_ROOT is defined/created, and before launch.
+    assert script.index('SD_USER_ROOT="/shared/users/$USER"') < script.index('cd "$SD_USER_ROOT"')
+    assert script.index('cd "$SD_USER_ROOT"') < script.index("jupyter lab")
 
 
 def test_notebook_sbatch_terminal_cd_also_applies_to_container(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec(container_image="/shared/images/data-science.sif")
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)
-    assert 'cd "$IIT_USER_ROOT"' in script
-    assert script.index('cd "$IIT_USER_ROOT"') < script.index("apptainer exec")
+    assert 'cd "$SD_USER_ROOT"' in script
+    assert script.index('cd "$SD_USER_ROOT"') < script.index("apptainer exec")
 
 
 def test_notebook_sbatch_token_echo_uses_double_quotes(tmp_path):
-    from iitgpu.jobs import make_job_folder, render_notebook_sbatch
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
     spec = _nb_spec()
     folder = make_job_folder(str(tmp_path), spec)
     script = render_notebook_sbatch(spec, folder)

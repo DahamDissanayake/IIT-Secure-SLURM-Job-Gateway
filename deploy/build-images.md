@@ -43,7 +43,7 @@ All images are built from the `.def` files in `deploy/images/`.
 Run on the **login node** (or GPU host), output directly to `/shared/images/`.
 
 ```bash
-cd /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway
+cd /home/slurmadmin/slurm-deck
 
 # llm-finetune — transformers, peft, trl, bitsandbytes, accelerate
 sudo apptainer build /shared/images/llm-finetune.sif deploy/images/llm-finetune.def

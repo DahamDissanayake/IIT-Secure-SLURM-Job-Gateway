@@ -8,14 +8,14 @@ import pytest
 DEPLOY = Path(__file__).parent.parent / "deploy"
 
 
-@pytest.mark.parametrize("script", ["iit-gpu-adduser.sh", "iit-gpu-deluser.sh"])
+@pytest.mark.parametrize("script", ["slurm-deck-adduser.sh", "slurm-deck-deluser.sh"])
 def test_script_exists_and_executable(script):
     p = DEPLOY / script
     assert p.exists(), f"deploy/{script} missing"
     assert p.stat().st_mode & 0o111, f"deploy/{script} not executable"
 
 
-@pytest.mark.parametrize("script", ["iit-gpu-adduser.sh", "iit-gpu-deluser.sh"])
+@pytest.mark.parametrize("script", ["slurm-deck-adduser.sh", "slurm-deck-deluser.sh"])
 def test_script_passes_bash_syntax_check(script):
     r = subprocess.run(["bash", "-n", str(DEPLOY / script)],
                        capture_output=True, text=True)
@@ -23,7 +23,7 @@ def test_script_passes_bash_syntax_check(script):
 
 
 def test_adduser_rejects_bad_username():
-    r = subprocess.run(["bash", str(DEPLOY / "iit-gpu-adduser.sh"), "Bad Name!", "--dry-run"],
+    r = subprocess.run(["bash", str(DEPLOY / "slurm-deck-adduser.sh"), "Bad Name!", "--dry-run"],
                        capture_output=True, text=True,
                        env={"GPU_HOST_SSH": "x@y", "PATH": "/usr/bin:/bin"})
     assert r.returncode != 0
@@ -32,7 +32,7 @@ def test_adduser_rejects_bad_username():
 
 def test_deluser_refuses_protected_accounts():
     for acct in ("public", "root", "slurm"):
-        r = subprocess.run(["bash", str(DEPLOY / "iit-gpu-deluser.sh"), acct, "--dry-run"],
+        r = subprocess.run(["bash", str(DEPLOY / "slurm-deck-deluser.sh"), acct, "--dry-run"],
                            capture_output=True, text=True,
                            env={"GPU_HOST_SSH": "x@y", "PATH": "/usr/bin:/bin"})
         assert r.returncode != 0, f"deluser should refuse {acct}"
@@ -41,7 +41,7 @@ def test_deluser_refuses_protected_accounts():
 
 def test_adduser_dry_run_picks_uid(tmp_path):
     # --dry-run must not require root and should print a chosen UID without changing anything
-    r = subprocess.run(["bash", str(DEPLOY / "iit-gpu-adduser.sh"), "alice", "--dry-run"],
+    r = subprocess.run(["bash", str(DEPLOY / "slurm-deck-adduser.sh"), "alice", "--dry-run"],
                        capture_output=True, text=True,
                        env={"GPU_HOST_SSH": "localhost", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
                             "UID_MIN": "2000", "UID_MAX": "60000"})
@@ -53,19 +53,19 @@ def test_adduser_dry_run_picks_uid(tmp_path):
 # ── config role detection ──────────────────────────────────────────────────────
 
 def test_is_admin_true_when_in_admin_group(monkeypatch):
-    from iitgpu import config
-    with patch("iitgpu.config.user_groups", return_value={"gpuusers", "gpuadmins"}):
+    from slurmdeck import config
+    with patch("slurmdeck.config.user_groups", return_value={"gpuusers", "gpuadmins"}):
         assert config.is_admin() is True
 
 
 def test_is_admin_false_when_not_in_admin_group(monkeypatch):
-    from iitgpu import config
-    with patch("iitgpu.config.user_groups", return_value={"gpuusers"}):
+    from slurmdeck import config
+    with patch("slurmdeck.config.user_groups", return_value={"gpuusers"}):
         assert config.is_admin() is False
 
 
 def test_user_groups_returns_set():
-    from iitgpu.config import user_groups
+    from slurmdeck.config import user_groups
     g = user_groups()
     assert isinstance(g, set)
 
@@ -77,7 +77,7 @@ def test_adduser_shell_user_dry_run_not_in_gpuusers():
     from pathlib import Path
     DEPLOY = Path(__file__).parent.parent / "deploy"
     r = subprocess.run(
-        ["bash", str(DEPLOY / "iit-gpu-adduser.sh"), "testshell", "--dry-run", "--shell-user"],
+        ["bash", str(DEPLOY / "slurm-deck-adduser.sh"), "testshell", "--dry-run", "--shell-user"],
         capture_output=True, text=True,
         env={"GPU_HOST_SSH": "x@localhost_unreachable",
              "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
@@ -100,7 +100,7 @@ def test_adduser_admin_and_shell_user_mutually_exclusive():
     from pathlib import Path
     DEPLOY = Path(__file__).parent.parent / "deploy"
     r = subprocess.run(
-        ["bash", str(DEPLOY / "iit-gpu-adduser.sh"),
+        ["bash", str(DEPLOY / "slurm-deck-adduser.sh"),
          "alice", "--dry-run", "--admin", "--shell-user"],
         capture_output=True, text=True,
         env={"GPU_HOST_SSH": "x@y", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
@@ -113,7 +113,7 @@ def test_adduser_shell_user_bash_syntax():
     import subprocess
     from pathlib import Path
     DEPLOY = Path(__file__).parent.parent / "deploy"
-    r = subprocess.run(["bash", "-n", str(DEPLOY / "iit-gpu-adduser.sh")],
+    r = subprocess.run(["bash", "-n", str(DEPLOY / "slurm-deck-adduser.sh")],
                        capture_output=True, text=True)
     assert r.returncode == 0, f"bash -n failed: {r.stderr}"
 
@@ -122,6 +122,6 @@ def test_deluser_bash_syntax():
     import subprocess
     from pathlib import Path
     DEPLOY = Path(__file__).parent.parent / "deploy"
-    r = subprocess.run(["bash", "-n", str(DEPLOY / "iit-gpu-deluser.sh")],
+    r = subprocess.run(["bash", "-n", str(DEPLOY / "slurm-deck-deluser.sh")],
                        capture_output=True, text=True)
     assert r.returncode == 0, f"bash -n failed: {r.stderr}"

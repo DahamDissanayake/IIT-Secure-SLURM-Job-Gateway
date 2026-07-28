@@ -8,15 +8,15 @@
 #
 # DEPLOYMENT PREREQUISITE (manual, one time):
 #   The admin panel invokes this as
-#       sudo -n -u slurmadmin /opt/iit-gpu/deploy/resize-pods.sh <N>
+#       sudo -n -u slurmadmin /opt/slurm-deck/deploy/resize-pods.sh <N>
 #   which only works once deploy/sudoers-gateway-admin -- which carries the
-#       %gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/iit-gpu/deploy/resize-pods.sh *
+#       %gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/slurm-deck/deploy/resize-pods.sh *
 #   grant -- has been installed on the login node:
 #       sudo install -m 0440 -o root -g root \
-#            deploy/sudoers-gateway-admin /etc/sudoers.d/iit-gpu-admin
-#       sudo visudo -cf /etc/sudoers.d/iit-gpu-admin
-#   deploy/redeploy-igm.sh does NOT install sudoers files; a plain redeploy of
-#   /opt/iit-gpu leaves this feature failing with a sudo permission error until
+#            deploy/sudoers-gateway-admin /etc/sudoers.d/slurm-deck-admin
+#       sudo visudo -cf /etc/sudoers.d/slurm-deck-admin
+#   deploy/redeploy-slurm-deck.sh does NOT install sudoers files; a plain redeploy of
+#   /opt/slurm-deck leaves this feature failing with a sudo permission error until
 #   the install above is run by hand. See README.md ("sudoers-gateway-admin").
 #
 # --dry-run: only rewrite the LOCAL $SLURM_CONF_DIR files (gres.conf,
@@ -37,7 +37,7 @@ GPU_HOST_SSH="${GPU_HOST_SSH:-root-daham@192.168.122.1}"
 # script runs as -- cannot create a lockfile there; `exec 9>` would fail and
 # set -e would abort the whole resize before it did anything. /tmp is writable
 # by slurmadmin and is where this script already stages its sync directories.
-LOCK_FILE="${RESIZE_LOCK_FILE:-/tmp/iit-gpu-resize.lock}"
+LOCK_FILE="${RESIZE_LOCK_FILE:-/tmp/slurm-deck-resize.lock}"
 
 if ! [[ "$NEW_N" =~ ^[0-9]+$ ]] || [ "$NEW_N" -lt 1 ]; then
     echo "ERROR: pod count must be a positive integer, got: '$NEW_N'" >&2
@@ -107,7 +107,7 @@ rollback() {
     cp "$CONF_DIR/slurm.conf.bak.$TS" "$CONF_DIR/slurm.conf"
     sudo systemctl restart slurmctld
     local rb_rc=0
-    gpu_sync "/tmp/iit-resize-rollback-$TS" || rb_rc=$?
+    gpu_sync "/tmp/slurm-deck-resize-rollback-$TS" || rb_rc=$?
     sudo scontrol update NodeName="$NODE_NAME" State=RESUME || true
     if [ "$rb_rc" -ne 0 ]; then
         echo "CRITICAL: rollback of the GPU HOST FAILED (exit $rb_rc)." >&2
@@ -126,7 +126,7 @@ echo "== restarting slurmctld (login node)"
 sudo systemctl restart slurmctld
 
 echo "== syncing gres.conf to the GPU host and restarting slurmd"
-if ! gpu_sync "/tmp/iit-resize-$TS"; then
+if ! gpu_sync "/tmp/slurm-deck-resize-$TS"; then
     echo "ERROR: GPU-host sync/restart failed -- rolling back" >&2
     rollback
 fi

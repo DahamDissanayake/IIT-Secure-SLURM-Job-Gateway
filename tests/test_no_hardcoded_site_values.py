@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-IITGPU = Path(__file__).parent.parent / "iitgpu"
+SLURMDECK = Path(__file__).parent.parent / "slurmdeck"
 
 # Patterns that indicate a leaked site constant (IPs, the gateway port, the GID).
 _FORBIDDEN = [
@@ -15,10 +15,10 @@ _FORBIDDEN = [
 
 
 def _py_files():
-    return [p for p in IITGPU.rglob("*.py") if "__pycache__" not in str(p)]
+    return [p for p in SLURMDECK.rglob("*.py") if "__pycache__" not in str(p)]
 
 
-def test_no_hardcoded_site_values_in_iitgpu():
+def test_no_hardcoded_site_values_in_slurmdeck():
     offenders = []
     for f in _py_files():
         text = f.read_text()

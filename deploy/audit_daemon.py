@@ -8,9 +8,9 @@ Also brokers user-DB CRUD and privileged reads; all admin verbs are gated by
 checking that the peer UID is in the admin group before execution.
 
 Env vars:
-  AUDIT_SOCKET   default /run/iit-gpu/audit.sock
-  AUDIT_SPOOL    default /run/iit-gpu/spool
-  AUDIT_STATE    default /var/lib/iit-gpu
+  AUDIT_SOCKET   default /run/slurm-deck/audit.sock
+  AUDIT_SPOOL    default /run/slurm-deck/spool
+  AUDIT_STATE    default /var/lib/slurm-deck
   ADMIN_GROUP    default gpuadmins
   GPUUSERS_GROUP default gpuusers
   NFS_ROOT       default /shared
@@ -35,9 +35,9 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 _log = logging.getLogger("audit_daemon")
 
-SOCKET_PATH    = os.environ.get("AUDIT_SOCKET",    "/run/iit-gpu/audit.sock")
-SPOOL_DIR      = Path(os.environ.get("AUDIT_SPOOL",  "/run/iit-gpu/spool"))
-STATE_DIR      = Path(os.environ.get("AUDIT_STATE",  "/var/lib/iit-gpu"))
+SOCKET_PATH    = os.environ.get("AUDIT_SOCKET",    "/run/slurm-deck/audit.sock")
+SPOOL_DIR      = Path(os.environ.get("AUDIT_SPOOL",  "/run/slurm-deck/spool"))
+STATE_DIR      = Path(os.environ.get("AUDIT_STATE",  "/var/lib/slurm-deck"))
 DB_PATH        = STATE_DIR / "audit.db"
 USERS_DB       = STATE_DIR / "users.db"
 JSONL_PATH     = STATE_DIR / "audit.jsonl"
@@ -47,7 +47,7 @@ JOB_RATE_LIMIT = int(os.environ.get("JOB_RATE_LIMIT", "20"))
 # Secrets file holding RESEND_API_KEY — readable only by root + gpusync (0640
 # root:gpusync). The daemon is the ONLY in-process mail sender, so regular users
 # never need (and never get) read access to the API key. See C1 fix.
-SECRETS_ENV    = os.environ.get("IIT_SECRETS_ENV", "/opt/iit-gpu/deploy/secrets.env")
+SECRETS_ENV    = os.environ.get("SD_SECRETS_ENV", "/opt/slurm-deck/deploy/secrets.env")
 _RESEND_URL    = "https://api.resend.com/emails"
 
 
@@ -85,7 +85,7 @@ def _resend_send(to: str, subject: str, html: str,
     req = urllib.request.Request(
         _RESEND_URL, data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {key}",
-                 "User-Agent": "iit-gpu-mailer/1.0",
+                 "User-Agent": "slurm-deck-mailer/1.0",
                  "Content-Type": "application/json"},
         method="POST",
     )
@@ -101,7 +101,7 @@ _running = True
 _MAX_MSG  = 1_048_576   # 1 MiB hard cap on any single message
 
 _ALLOWED_UNITS = frozenset({
-    "iit-gpu-audit", "slurmctld", "slurmd", "mariadb", "slurmdbd",
+    "slurm-deck-audit", "slurmctld", "slurmd", "mariadb", "slurmdbd",
 })
 
 

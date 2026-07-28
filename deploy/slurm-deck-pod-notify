@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""slurm-deck-pod-notify — fires (and clears) any "notify when free" pod
+subscriptions whose threshold is currently met.
+
+Run periodically by slurm-deck-pod-notify.timer (every 2 minutes). Must run as
+an admin (gpuadmins) identity: slurmdeck.pod_notify.check_and_notify() sends
+mail through the audit daemon's mail.send verb, which only honours an
+explicit recipient address for admin/root callers (SO_PEERCRED-checked) --
+a non-admin caller's mail gets forced to their own address (anti-relay),
+which would break this checker's whole purpose of emailing someone ELSE once
+their threshold hits. NOT literal root, though: /shared has root_squash, so
+an actual root process can't read/write the subscriptions file there --
+see slurm-deck-pod-notify.service, which runs this as slurmadmin instead.
+"""
+import os
+import sys
+
+sys.path.insert(0, "/opt/slurm-deck")
+os.environ.setdefault("NFS_ROOT", "/shared")
+os.environ.setdefault("SD_SITE_ENV", "/opt/slurm-deck/deploy/site.env")
+
+from slurmdeck.pod_notify import check_and_notify  # noqa: E402
+
+if __name__ == "__main__":
+    n = check_and_notify()
+    if n:
+        print(f"slurm-deck-pod-notify: sent {n} notification(s)")

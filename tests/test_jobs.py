@@ -2,7 +2,7 @@
 import getpass
 from pathlib import Path
 import pytest
-from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, write_sbatch
+from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch, write_sbatch
 
 
 def _spec(**kwargs) -> JobSpec:
@@ -100,8 +100,8 @@ def test_write_sbatch_creates_file(tmp_path):
     assert Path(path).read_text().startswith("#!/bin/bash")
 
 
-from iitgpu.jobs import TaskDefaults, resource_defaults, TASK_POD_DEFAULTS
-from iitgpu.slurm import NodeStats
+from slurmdeck.jobs import TaskDefaults, resource_defaults, TASK_POD_DEFAULTS
+from slurmdeck.slurm import NodeStats
 
 
 def _stats():
@@ -144,7 +144,7 @@ def test_resource_defaults_unknown_falls_back_to_custom():
 def test_resource_defaults_without_stats_degrades_gracefully(monkeypatch):
     """No live stats available (e.g. scontrol unreachable) -- must not crash,
     falls back to a single-pod-sized allocation."""
-    import iitgpu.jobs as jobs
+    import slurmdeck.jobs as jobs
     monkeypatch.setattr(jobs, "_live_stats", lambda: None)
     d = resource_defaults("notebook")
     assert d.gpu_shards == 1 and d.cpus >= 1 and d.mem_gb >= 1
@@ -197,7 +197,7 @@ def test_jobspec_task_type_can_be_set():
 
 
 def _folder_spec():
-    from iitgpu.jobs import JobSpec
+    from slurmdeck.jobs import JobSpec
     return JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=1,
                    mem_gb=1, time_limit="", run_command="", user="tester")
 
@@ -205,13 +205,13 @@ def _folder_spec():
 def test_job_folder_is_owner_and_admin_only(tmp_path):
     """Other users must not reach a job folder: it holds the user's scripts.
 
-    Production's jobs/<user> parent is provisioned 2770 by iit-gpu-adduser.sh
+    Production's jobs/<user> parent is provisioned 2770 by slurm-deck-adduser.sh
     (setgid), and the folder gets its setgid bit by kernel inheritance from
     that parent -- not from a chmod inside make_job_folder. Set up the same
     setgid parent here so the assertion matches what production produces.
     """
     import os
-    from iitgpu.jobs import make_job_folder
+    from slurmdeck.jobs import make_job_folder
     user_dir = tmp_path / "tester"
     user_dir.mkdir()
     user_dir.chmod(0o2770)
@@ -227,8 +227,8 @@ def test_job_folder_group_comes_from_config_not_a_hardcoded_name(tmp_path, monke
     that value is what reaches getgrnam.
     """
     from dataclasses import replace
-    import iitgpu.config as C
-    import iitgpu.jobs as J
+    import slurmdeck.config as C
+    import slurmdeck.jobs as J
 
     seen = {}
 

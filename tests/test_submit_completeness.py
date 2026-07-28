@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 import pytest
-from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch, build_interactive_cmd
+from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch, build_interactive_cmd
 
 
 def _spec(**kw):
@@ -74,48 +74,48 @@ def test_interactive_cmd_omits_time_when_unset():
 # ── Validators ─────────────────────────────────────────────────────────────────
 
 def test_clean_array_spec_valid():
-    from iitgpu.validate import clean_array_spec
+    from slurmdeck.validate import clean_array_spec
     assert clean_array_spec("0-9") == "0-9"
     assert clean_array_spec("1-100%4") == "1-100%4"
     assert clean_array_spec("1,3,5") == "1,3,5"
 
 
 def test_clean_array_spec_rejects_garbage():
-    from iitgpu.validate import clean_array_spec
+    from slurmdeck.validate import clean_array_spec
     assert clean_array_spec("rm -rf /") is None
     assert clean_array_spec("") is None
     assert clean_array_spec("abc") is None
 
 
 def test_clean_dependency_valid():
-    from iitgpu.validate import clean_dependency
+    from slurmdeck.validate import clean_dependency
     assert clean_dependency("afterok:123") == "afterok:123"
     assert clean_dependency("afterany:1:2:3") == "afterany:1:2:3"
     assert clean_dependency("singleton") == "singleton"
 
 
 def test_clean_dependency_rejects_garbage():
-    from iitgpu.validate import clean_dependency
+    from slurmdeck.validate import clean_dependency
     assert clean_dependency("afterok:123; rm -rf /") is None
     assert clean_dependency("badtype:1") is None
     assert clean_dependency("") is None
 
 
 def test_validate_against_qos_rejects_too_many_gpus():
-    from iitgpu.validate import validate_against_qos
+    from slurmdeck.validate import validate_against_qos
     ok, msg = validate_against_qos(gpu_shards=2, time_limit="01:00:00", max_shards_per_user=1)
     assert ok is False
     assert "GPU" in msg
 
 
 def test_validate_against_qos_rejects_over_walltime():
-    from iitgpu.validate import validate_against_qos
+    from slurmdeck.validate import validate_against_qos
     ok, msg = validate_against_qos(gpu_shards=1, time_limit="48:00:00", max_shards_per_user=1, max_hours=8)
     assert ok is False
     assert "wall-time" in msg.lower()
 
 
 def test_validate_against_qos_accepts_in_policy():
-    from iitgpu.validate import validate_against_qos
+    from slurmdeck.validate import validate_against_qos
     ok, _ = validate_against_qos(gpu_shards=1, time_limit="04:00:00", max_shards_per_user=1, max_hours=8)
     assert ok is True

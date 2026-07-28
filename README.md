@@ -1,4 +1,4 @@
-# IIT-GPU-Manager
+# Slurm Deck
 
 Secure terminal gateway for SLURM GPU job submission at IIT. Users SSH in and land directly in a forced-command TUI — they can never drop to a real shell (unless explicitly provisioned as a shell user, see below). Every action is logged before it is executed, GPU capacity is split into shares so more than one person can run at once, and every user's files are jailed to their own private area on the shared filesystem.
 
@@ -30,7 +30,7 @@ Secure terminal gateway for SLURM GPU job submission at IIT. Users SSH in and la
    - [5. Admin](#5-admin-admins-only)
 5. [Linux machine setup (before installation)](#linux-machine-setup-before-installation)
 6. [Installation](#installation)
-7. [Installing via an AI coding agent (igm-installer skill)](#installing-via-an-ai-coding-agent-igm-installer-skill)
+7. [Installing via an AI coding agent (slurm-deck-installer skill)](#installing-via-an-ai-coding-agent-slurm-deck-installer-skill)
 8. [Adding and removing users](#adding-and-removing-users)
 9. [Configuration reference](#configuration-reference)
 10. [Audit logging](#audit-logging)
@@ -64,13 +64,13 @@ Admins (a separate Linux group, see below) get everything above plus a full admi
                           ┌─────────────────────────────┐
    SSH (users)  ────────► │   Login node 192.168.122.10 │
    port 2225              │   sshd  ForceCommand         │
-                          │   ├─ iit-gpu-gateway (scp/   │
+                          │   ├─ slurm-deck-gateway (scp/   │
                           │   │   rsync/sftp passthrough,│
                           │   │   or launch the TUI)     │
-                          │   ├─ iit-gpu-manager (TUI,    │
-                          │   │   PYTHONPATH=/opt/iit-gpu)│
+                          │   ├─ slurm-deck (TUI,    │
+                          │   │   PYTHONPATH=/opt/slurm-deck)│
                           │   ├─ slurmctld                │
-                          │   └─ iit-gpu-audit.service     │
+                          │   └─ slurm-deck-audit.service     │
                           │      (SQLite + JSONL log)      │
                           └───────────────┬─────────────┘
                                           │ NFS (rw, /shared)
@@ -80,7 +80,7 @@ Admins (a separate Linux group, see below) get everything above plus a full admi
                           │  192.168.122.1 (iit-MS-7E06)  │
                           │  ├─ slurmd                    │
                           │  ├─ NFS server for /shared     │
-                          │  ├─ iit-gpu-stats-writer        │
+                          │  ├─ slurm-deck-stats-writer        │
                           │  │   (writes GPU/CPU/RAM json)  │
                           │  └─ RTX 5090 (gres/shard:4)      │
                           └───────────────────────────────┘
@@ -88,33 +88,33 @@ Admins (a separate Linux group, see below) get everything above plus a full admi
 
 **Request flow for a typical action** (e.g. launching JupyterLab):
 
-1. User SSHes to the login node. `sshd`'s `Match Group gpuusers` block fires `ForceCommand /usr/local/bin/iit-gpu-gateway` — the user never gets a raw shell.
-2. `iit-gpu-gateway` recognises this is an interactive session (not an `scp`/`rsync`/`sftp` transfer) and `exec`s `/usr/local/bin/iit-gpu-manager`, a hardened launcher that strips the inherited environment (`env -i`) and runs `python3 -m iitgpu` with `PYTHONPATH=/opt/iit-gpu`.
-3. `iitgpu.__main__` installs signal traps (so `Ctrl-Z`/backgrounding can't expose a shell), logs `session_start` to the audit daemon, fires a login-notification email in the background, and enforces a forced password change if one is pending.
-4. The Main Menu (`iitgpu/menu.py`) drives everything from here — see [Using the tool](#using-the-tool--full-menu-reference) below.
-5. Job submission (`iitgpu/jobs.py` renders the `sbatch` script, `iitgpu/slurm.py` calls `sbatch`) happens as the **user's own real Linux account** — no shared/sudo identity is needed because every gateway user has a real UID on both nodes (see next section). `sbatch` runs on the login node; the job itself executes on the GPU node via `slurmd`.
-6. Every menu action that matters (job submit/cancel, file transfer, admin action, login) calls `iitgpu.auditclient.log()`, which delivers the event to `iit-gpu-audit.service` over a Unix socket (falling back to an on-disk spool if the daemon is briefly unreachable). The daemon is the only process that can write `/var/lib/iit-gpu/audit.db` / `audit.jsonl`.
+1. User SSHes to the login node. `sshd`'s `Match Group gpuusers` block fires `ForceCommand /usr/local/bin/slurm-deck-gateway` — the user never gets a raw shell.
+2. `slurm-deck-gateway` recognises this is an interactive session (not an `scp`/`rsync`/`sftp` transfer) and `exec`s `/usr/local/bin/slurm-deck`, a hardened launcher that strips the inherited environment (`env -i`) and runs `python3 -m slurmdeck` with `PYTHONPATH=/opt/slurm-deck`.
+3. `slurmdeck.__main__` installs signal traps (so `Ctrl-Z`/backgrounding can't expose a shell), logs `session_start` to the audit daemon, fires a login-notification email in the background, and enforces a forced password change if one is pending.
+4. The Main Menu (`slurmdeck/menu.py`) drives everything from here — see [Using the tool](#using-the-tool--full-menu-reference) below.
+5. Job submission (`slurmdeck/jobs.py` renders the `sbatch` script, `slurmdeck/slurm.py` calls `sbatch`) happens as the **user's own real Linux account** — no shared/sudo identity is needed because every gateway user has a real UID on both nodes (see next section). `sbatch` runs on the login node; the job itself executes on the GPU node via `slurmd`.
+6. Every menu action that matters (job submit/cancel, file transfer, admin action, login) calls `slurmdeck.auditclient.log()`, which delivers the event to `slurm-deck-audit.service` over a Unix socket (falling back to an on-disk spool if the daemon is briefly unreachable). The daemon is the only process that can write `/var/lib/slurm-deck/audit.db` / `audit.jsonl`.
 7. All persistent state — job folders, environments, models, templates, and each user's private files — lives under `/shared`, NFS-mounted read/write on both nodes. Filesystem permissions (not the TUI) are the last line of defence: even a bug in the TUI's jail logic can't let one user read another's files, because the OS itself denies it.
 
 ---
 
 ## Linux users, groups & access model
 
-This is the part that actually enforces isolation — the TUI's own path-jail logic (`iitgpu/validate.py`) is a *convenience* layer that keeps well-behaved code from wandering outside a user's area; the **real** boundary is standard POSIX permissions plus these three groups, checked identically on both nodes.
+This is the part that actually enforces isolation — the TUI's own path-jail logic (`slurmdeck/validate.py`) is a *convenience* layer that keeps well-behaved code from wandering outside a user's area; the **real** boundary is standard POSIX permissions plus these three groups, checked identically on both nodes.
 
 ### The three groups
 
 | Group | Purpose | Who's in it |
 |---|---|---|
 | `gpuusers` | Gates SSH access to the gateway. `sshd`'s `Match Group gpuusers` block is what fires `ForceCommand` and locks down forwarding. | Every "tool" and "admin" user (not shell users) |
-| `gpuadmins` | Grants the admin panel (`iitgpu.config.is_admin()` just checks membership) **and** read/write access to every user's private folder on disk (folders are mode `2770` owned by that user, group `gpuadmins`). | Admin accounts only |
+| `gpuadmins` | Grants the admin panel (`slurmdeck.config.is_admin()` just checks membership) **and** read/write access to every user's private folder on disk (folders are mode `2770` owned by that user, group `gpuadmins`). | Admin accounts only |
 | `docker` (login node only) | Passwordless `docker` access for "shell" accounts that need it. | Shell users only, opt-in |
 
 A user's group membership is the *entire* access-control mechanism — the TUI binary itself is never copied or modified per user, and there is no per-user config file granting privilege.
 
 ### The three account types
 
-Every account is provisioned with `deploy/iit-gpu-adduser.sh` (directly, or via the admin panel's **Provision user**), which creates one of three kinds of account:
+Every account is provisioned with `deploy/slurm-deck-adduser.sh` (directly, or via the admin panel's **Provision user**), which creates one of three kinds of account:
 
 | Type | Flag | `gpuusers`? | `gpuadmins`? | Gets on login | Audited? |
 |---|---|---|---|---|---|
@@ -128,7 +128,7 @@ Regardless of type, every account is also:
 
 ### Why real per-user Linux accounts (not one shared account)
 
-Every gateway user is a **real Linux user with a real UID**, created identically (same UID) on *both* nodes by `iit-gpu-adduser.sh`:
+Every gateway user is a **real Linux user with a real UID**, created identically (same UID) on *both* nodes by `slurm-deck-adduser.sh`:
 
 1. Picks a UID that's free on **both** the login node and the GPU node (queries `getent passwd` on each, takes the max, walks up until free on both) — so a file owned by UID 2011 means the same person on either machine.
 2. `useradd -u <uid> -g <uid> -m -s /bin/bash <username>` on the login node, then the identical command over SSH on the GPU node.
@@ -148,7 +148,7 @@ Every gateway user is a **real Linux user with a real UID**, created identically
 | `/shared/jobs/<username>` | `<user> : gpuadmins` | `2770` + ACL | Owner + any `gpuadmins` member — per-run job folders, `sbatch` scripts, `slurm-<id>.out/.err` |
 | `/shared/envs`, `/shared/models`, `/shared/datasets`, `/shared/data`, `/shared/templates` | `public : gpuusers` (typically) | group-writable, setgid | Read/write by any `gpuusers` member — shared assets everyone can use |
 
-The TUI's own jail (`iitgpu/validate.py`) mirrors this: `user_browse_roots()` / `in_user_browse_jail()` limit a regular user's file browser to their own `users/<username>` folder plus the shared read-only asset directories; `in_user_upload_jail()` limits uploads/writes to their own folder only. Admins bypass these per-user jails (they use the global `in_jail()`, scoped only to `NFS_ROOT` itself) — but as noted above, that's a convenience, not the actual security boundary; the filesystem enforces the boundary either way.
+The TUI's own jail (`slurmdeck/validate.py`) mirrors this: `user_browse_roots()` / `in_user_browse_jail()` limit a regular user's file browser to their own `users/<username>` folder plus the shared read-only asset directories; `in_user_upload_jail()` limits uploads/writes to their own folder only. Admins bypass these per-user jails (they use the global `in_jail()`, scoped only to `NFS_ROOT` itself) — but as noted above, that's a convenience, not the actual security boundary; the filesystem enforces the boundary either way.
 
 ### `sudo` scope — exactly what each group can run as root
 
@@ -164,21 +164,21 @@ Nothing runs the TUI itself as root. Two narrow `sudoers.d` files grant exactly 
 ```
 %gpuadmins ALL=(root) NOPASSWD:
     /usr/bin/scontrol update *, /usr/bin/scontrol reconfigure,
-    /usr/local/bin/iit-gpu-adduser, /usr/local/bin/iit-gpu-deluser,
+    /usr/local/bin/slurm-deck-adduser, /usr/local/bin/slurm-deck-deluser,
     /usr/sbin/chpasswd, /usr/bin/sacctmgr, /usr/bin/scancel
 
-%gpuadmins ALL=(%gpuusers) NOPASSWD: /usr/local/bin/iit-gpu-manager
+%gpuadmins ALL=(%gpuusers) NOPASSWD: /usr/local/bin/slurm-deck
 
-%gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/iit-gpu/deploy/resize-pods.sh *
+%gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/slurm-deck/deploy/resize-pods.sh *
 ```
-The second line is what powers **Log in as user**: an admin can launch the TUI *as* any `gpuusers` member (`sudo -H -u <user> iit-gpu-manager`) to see exactly what that user sees — never a general shell, only ever the TUI launcher, and every action taken is audited under the *target* user's identity (via `SO_PEERCRED` on the audit socket), with the switch itself separately logged.
+The second line is what powers **Log in as user**: an admin can launch the TUI *as* any `gpuusers` member (`sudo -H -u <user> slurm-deck`) to see exactly what that user sees — never a general shell, only ever the TUI launcher, and every action taken is audited under the *target* user's identity (via `SO_PEERCRED` on the audit socket), with the switch itself separately logged.
 
-The third line powers the admin panel's **pod-count resize** (Pods screen): the panel runs `sudo -n -u slurmadmin /opt/iit-gpu/deploy/resize-pods.sh <N>` — as `slurmadmin`, the account that owns `gres.conf`/`slurm.conf` and the `slurmctld`/`slurmd` restart path, never as root (the script refuses to run as anyone else). The grant is the run only; the script itself enforces the empty-queue check, a lockfile, and backup/rollback.
+The third line powers the admin panel's **pod-count resize** (Pods screen): the panel runs `sudo -n -u slurmadmin /opt/slurm-deck/deploy/resize-pods.sh <N>` — as `slurmadmin`, the account that owns `gres.conf`/`slurm.conf` and the `slurmctld`/`slurmd` restart path, never as root (the script refuses to run as anyone else). The grant is the run only; the script itself enforces the empty-queue check, a lockfile, and backup/rollback.
 
-> **Installing this file is a manual step.** `deploy/redeploy-igm.sh` fast-forwards `/opt/iit-gpu` and resyncs a couple of `/usr/local/bin` scripts — it does **not** touch `/etc/sudoers.d`. After any change to `deploy/sudoers-gateway-admin` (including the resize grant above), re-run the install on the login node or the affected admin action fails with a bare `sudo` permission error:
+> **Installing this file is a manual step.** `deploy/redeploy-slurm-deck.sh` fast-forwards `/opt/slurm-deck` and resyncs a couple of `/usr/local/bin` scripts — it does **not** touch `/etc/sudoers.d`. After any change to `deploy/sudoers-gateway-admin` (including the resize grant above), re-run the install on the login node or the affected admin action fails with a bare `sudo` permission error:
 > ```bash
-> sudo install -m 0440 -o root -g root deploy/sudoers-gateway-admin /etc/sudoers.d/iit-gpu-admin
-> sudo visudo -cf /etc/sudoers.d/iit-gpu-admin
+> sudo install -m 0440 -o root -g root deploy/sudoers-gateway-admin /etc/sudoers.d/slurm-deck-admin
+> sudo visudo -cf /etc/sudoers.d/slurm-deck-admin
 > ```
 
 ### `sshd` access rules (`deploy/sshd-gateway.conf`)
@@ -191,7 +191,7 @@ Match Group gpuadmins
     PermitOpen 192.168.122.1:*        # only to the compute node, nowhere else
 
 Match Group gpuusers
-    ForceCommand /usr/local/bin/iit-gpu-gateway
+    ForceCommand /usr/local/bin/slurm-deck-gateway
     PermitTTY yes
     AllowTcpForwarding local          # local (-L) port-forwards only — needed for tunnels
     PermitOpen 192.168.122.1:*        # restricted to the compute node — can't jump elsewhere
@@ -356,10 +356,10 @@ Shown only if you're in `gpuadmins`. The status line always shows active user co
 
 | Item | What it does |
 |---|---|
-| **Provision user** | Prompts: username, type (**tool** / **admin** / **shell** — shell requires an extra confirmation, warning it's unaudited), full name, email, and either a self-chosen or randomly generated initial password (forces a change on first login). Runs `iit-gpu-adduser.sh` under the hood (see [Adding and removing users](#adding-and-removing-users)) and writes a `users.db` row if an email was given, which also triggers the welcome email. |
-| **Offboard user** | Runs `iit-gpu-deluser.sh` (removes the account from both nodes; optional `--purge-data` to delete their `/shared` area too). |
+| **Provision user** | Prompts: username, type (**tool** / **admin** / **shell** — shell requires an extra confirmation, warning it's unaudited), full name, email, and either a self-chosen or randomly generated initial password (forces a change on first login). Runs `slurm-deck-adduser.sh` under the hood (see [Adding and removing users](#adding-and-removing-users)) and writes a `users.db` row if an email was given, which also triggers the welcome email. |
+| **Offboard user** | Runs `slurm-deck-deluser.sh` (removes the account from both nodes; optional `--purge-data` to delete their `/shared` area too). |
 | **View users** | Roster table: username, role, email, last login, etc. |
-| **Log in as user** | Launches the TUI *as* the chosen `gpuusers` member (`sudo -u <user> iit-gpu-manager`) to see exactly what they see. Audited under the target's identity; the switch itself is separately logged. |
+| **Log in as user** | Launches the TUI *as* the chosen `gpuusers` member (`sudo -u <user> slurm-deck`) to see exactly what they see. Audited under the target's identity; the switch itself is separately logged. |
 | **All-user job history** | Like Jobs → Job history, but always cluster-wide. |
 | **Cluster usage (all users)** | Usage/accounting reports across everyone, not just yourself. |
 | **Disk usage by user** | Per-user breakdown of `/shared/jobs/<user>` (and similar) disk consumption. |
@@ -369,7 +369,7 @@ Shown only if you're in `gpuadmins`. The status line always shows active user co
 | **QOS / limits** | View/adjust SLURM QOS settings (time/GPU-share ceilings). |
 | **Maintenance notice** | Sets or clears the cluster-wide banner that blocks non-admins from proceeding past the Main Menu. |
 | **Audit log** | Browse the audit trail (see [Audit logging](#audit-logging)). |
-| **Service health** | Status of `iit-gpu-audit`, `slurmctld`/`slurmd`, mail delivery, etc. |
+| **Service health** | Status of `slurm-deck-audit`, `slurmctld`/`slurmd`, mail delivery, etc. |
 | **Mail delivery log** | Tails `/var/log/msmtp.log` — the SLURM job-notification mail path. |
 | **Mail service: ON/OFF** | A single cluster-wide kill switch (a flag file every mail-sending code path checks) — instantly silences all outgoing mail (welcome/login/job-notification) without touching SMTP config. |
 
@@ -407,7 +407,7 @@ You need **two machines** (or, for a smaller/demo deployment, everything can tec
 1. Decide your `NFS_ROOT` (default `/shared`) and confirm it's already mounted read/write on both nodes.
 2. Decide your SLURM `account`/`qos`/`partition` names — these must already exist in `slurmdbd`/`slurm.conf`.
 3. Pick your admin group name (default `gpuadmins`) and gateway group name (default `gpuusers`) if you don't want the defaults.
-4. Have root/sudo on both nodes and password-less SSH from the login node to the compute node as a sudo-capable account (`iit-gpu-adduser.sh` needs this to provision the mirrored account on the GPU node).
+4. Have root/sudo on both nodes and password-less SSH from the login node to the compute node as a sudo-capable account (`slurm-deck-adduser.sh` needs this to provision the mirrored account on the GPU node).
 
 ---
 
@@ -418,8 +418,8 @@ Everything below runs **on the login node** unless stated otherwise.
 ### Step 1 — Clone the repository
 
 ```bash
-git clone <repo-url> /opt-src/iit-gpu-manager
-cd /opt-src/iit-gpu-manager
+git clone <repo-url> /opt-src/slurm-deck
+cd /opt-src/slurm-deck
 ```
 
 ### Step 2 — Configure site settings
@@ -450,29 +450,29 @@ This single script:
 2. Creates system group `gpuusers`, system group `auditadmin`, system users `slurmsvc` and `gpusync` (both no-login)
 3. Creates the shared directory tree under `NFS_ROOT` (`scripts/`, `jobs/`, `data/`, `envs/`, `models/`, `templates/`) with group-writable, setgid, and (if `acl` is present) default-ACL permissions for `gpuusers`
 4. Installs Miniforge (conda) to `CONDA_PREFIX_SHARED` if not already present, and wires `conda.sh` into `/etc/bash.bashrc` so non-interactive `sbatch` scripts pick it up
-5. Copies the repo to `/opt/iit-gpu/` (root-owned, `0755` — regular users cannot modify the tool)
+5. Copies the repo to `/opt/slurm-deck/` (root-owned, `0755` — regular users cannot modify the tool)
 6. `pip install`s `requirements.txt` system-wide
-7. Adds `gpusync` to `auditadmin` and `gpuusers` (the audit daemon execs code from `/opt/iit-gpu`, so it needs read access there too), creates `/var/lib/iit-gpu` (`0750`, owner `gpusync:auditadmin`)
+7. Adds `gpusync` to `auditadmin` and `gpuusers` (the audit daemon execs code from `/opt/slurm-deck`, so it needs read access there too), creates `/var/lib/slurm-deck` (`0750`, owner `gpusync:auditadmin`)
 8. If a `slurm` system account exists, adds it to `gpusync` so SLURM's `MailProg` (running as `SlurmUser`, not root) can read the mail API key, and restarts `slurmctld`
-9. Installs the hardened launcher at `/usr/local/bin/iit-gpu-manager` and the ForceCommand wrapper at `/usr/local/bin/iit-gpu-gateway`
-10. Installs and starts `iit-gpu-audit.service`
+9. Installs the hardened launcher at `/usr/local/bin/slurm-deck` and the ForceCommand wrapper at `/usr/local/bin/slurm-deck-gateway`
+10. Installs and starts `slurm-deck-audit.service`
 11. Installs `deploy/sshd-gateway.conf` into `/etc/ssh/sshd_config.d/`, validates with `sshd -t` (removes it automatically if invalid), reloads `sshd`
 12. Installs `deploy/sudoers-gateway` into `/etc/sudoers.d/`, validates with `visudo -cf` (removes it automatically if invalid)
-13. Installs the admin audit-log viewer at `/usr/local/bin/iit-gpu-log`
+13. Installs the admin audit-log viewer at `/usr/local/bin/slurm-deck-log`
 
 You'll also want the admin sudoers file and the per-user provisioning scripts, which `install.sh` does not install automatically (they're layered on afterward — see next step):
 ```bash
-sudo install -m 0755 deploy/iit-gpu-adduser.sh /usr/local/bin/iit-gpu-adduser
-sudo install -m 0755 deploy/iit-gpu-deluser.sh /usr/local/bin/iit-gpu-deluser
-sudo install -m 0440 -o root -g root deploy/sudoers-gateway-admin /etc/sudoers.d/iit-gpu-admin
-sudo visudo -cf /etc/sudoers.d/iit-gpu-admin   # verify before trusting it
+sudo install -m 0755 deploy/slurm-deck-adduser.sh /usr/local/bin/slurm-deck-adduser
+sudo install -m 0755 deploy/slurm-deck-deluser.sh /usr/local/bin/slurm-deck-deluser
+sudo install -m 0440 -o root -g root deploy/sudoers-gateway-admin /etc/sudoers.d/slurm-deck-admin
+sudo visudo -cf /etc/sudoers.d/slurm-deck-admin   # verify before trusting it
 ```
 
 ### Step 4 — Set `GPU_HOST_SSH` for the adduser script
 
-`iit-gpu-adduser.sh` needs to know how to reach the compute node as a sudo-capable account:
+`slurm-deck-adduser.sh` needs to know how to reach the compute node as a sudo-capable account:
 ```bash
-echo 'GPU_HOST_SSH=root@192.168.122.1' | sudo tee -a /opt/iit-gpu/deploy/site.env
+echo 'GPU_HOST_SSH=root@192.168.122.1' | sudo tee -a /opt/slurm-deck/deploy/site.env
 ```
 Test password-less SSH works before provisioning anyone:
 ```bash
@@ -482,14 +482,14 @@ ssh root@192.168.122.1 true
 ### Step 5 — Verify the service
 
 ```bash
-systemctl status iit-gpu-audit
-journalctl -u iit-gpu-audit -f
+systemctl status slurm-deck-audit
+journalctl -u slurm-deck-audit -f
 ```
 
 ### Step 6 — Provision your first admin and test
 
 ```bash
-sudo /usr/local/bin/iit-gpu-adduser <yourname> --admin
+sudo /usr/local/bin/slurm-deck-adduser <yourname> --admin
 ```
 Then from your own machine:
 ```bash
@@ -514,9 +514,9 @@ Restart `slurmctld` (login node) then `slurmd` (compute node) — in that order;
 
 ---
 
-## Installing via an AI coding agent (igm-installer skill)
+## Installing via an AI coding agent (slurm-deck-installer skill)
 
-This repo ships an `igm-installer` skill that drives the install above as a
+This repo ships an `slurm-deck-installer` skill that drives the install above as a
 **guided, checkpointed** conversation instead of a blind one-shot script: it
 runs the preflight checks from [Linux machine setup](#linux-machine-setup-before-installation),
 interviews you for the site-specific values `deploy/site.env` needs, then
@@ -528,16 +528,16 @@ It never runs the whole install unattended.
 ### Claude Code
 
 ```bash
-/plugin marketplace add DahamDissanayake/IIT-Secure-SLURM-Job-Gateway
-/plugin install igm-installer@iit-gpu-manager
-/igm-installer
+/plugin marketplace add DahamDissanayake/slurm-deck
+/plugin install slurm-deck-installer@slurm-deck
+/slurm-deck-installer
 ```
 
 Then answer its questions and approve each checkpoint as it comes up.
 
 ### Any other AI coding agent
 
-Open [`skills/igm-installer/AGENT-INSTRUCTIONS.md`](skills/igm-installer/AGENT-INSTRUCTIONS.md)
+Open [`skills/slurm-deck-installer/AGENT-INSTRUCTIONS.md`](skills/slurm-deck-installer/AGENT-INSTRUCTIONS.md)
 and paste it into your assistant of choice (Cursor, Copilot Workspace,
 Windsurf, etc.) with this repo open — it describes the same guided,
 checkpointed process in agent-agnostic terms.
@@ -546,15 +546,15 @@ checkpointed process in agent-agnostic terms.
 
 ## Adding and removing users
 
-**Always use `iit-gpu-adduser`/`iit-gpu-deluser`, not raw `useradd`/`usermod`** — the scripts are what keep UIDs, home ownership, group membership, SLURM association, and the per-user `/shared` area consistent across *both* nodes. Either run them directly as root, or use the admin panel's **Provision user** / **Offboard user**, which call the same scripts.
+**Always use `slurm-deck-adduser`/`slurm-deck-deluser`, not raw `useradd`/`usermod`** — the scripts are what keep UIDs, home ownership, group membership, SLURM association, and the per-user `/shared` area consistent across *both* nodes. Either run them directly as root, or use the admin panel's **Provision user** / **Offboard user**, which call the same scripts.
 
 ### Add a user
 
 ```bash
-sudo iit-gpu-adduser <username>                # tool user (default) — forced TUI, audited
-sudo iit-gpu-adduser <username> --admin        # admin — forced TUI + admin panel
-sudo iit-gpu-adduser <username> --shell-user   # real shell, NOT audited, gets docker group
-sudo iit-gpu-adduser <username> --dry-run      # preview every command without executing
+sudo slurm-deck-adduser <username>                # tool user (default) — forced TUI, audited
+sudo slurm-deck-adduser <username> --admin        # admin — forced TUI + admin panel
+sudo slurm-deck-adduser <username> --shell-user   # real shell, NOT audited, gets docker group
+sudo slurm-deck-adduser <username> --dry-run      # preview every command without executing
 ```
 Then set credentials:
 ```bash
@@ -566,9 +566,9 @@ What it does (full detail in [Linux users, groups & access model](#linux-users-g
 ### Remove a user
 
 ```bash
-sudo iit-gpu-deluser <username>                # remove the account from both nodes
-sudo iit-gpu-deluser <username> --purge-data   # also delete their /shared area
-sudo iit-gpu-deluser <username> --dry-run
+sudo slurm-deck-deluser <username>                # remove the account from both nodes
+sudo slurm-deck-deluser <username> --purge-data   # also delete their /shared area
+sudo slurm-deck-deluser <username> --dry-run
 ```
 
 ### Check who has access
@@ -606,7 +606,7 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 | `SLURM_PARTITION` | `gpu` | Default partition for job submission |
 | `GATEWAY_SHARED_USER` | `0` | Legacy: `1` runs all SLURM commands as one shared identity instead of each user's own account |
 | `GATEWAY_SHARED_USER_NAME` | `daham` | The shared identity, if the above is on |
-| `UID_MIN` / `UID_MAX` | `2000` / `60000` | UID range `iit-gpu-adduser` picks new accounts from |
+| `UID_MIN` / `UID_MAX` | `2000` / `60000` | UID range `slurm-deck-adduser` picks new accounts from |
 
 ### Gateway / tunnels
 
@@ -620,7 +620,7 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 | Variable | Default | Purpose |
 |---|---|---|
 | `MAX_GPUS` | `8` | Ceiling on *whole* GPUs per job (not used for share-based requests) |
-| `MAX_GPU_SHARDS` | `4` | **Fallback** ceiling on GPU shares (pods) per job. The real ceiling is the node's live shard count read from `scontrol show node` (`iitgpu.pods.pod_count`); this value is only used when that reading is unavailable, so set it to the `Count=` in `gres.conf` |
+| `MAX_GPU_SHARDS` | `4` | **Fallback** ceiling on GPU shares (pods) per job. The real ceiling is the node's live shard count read from `scontrol show node` (`slurmdeck.pods.pod_count`); this value is only used when that reading is unavailable, so set it to the `Count=` in `gres.conf` |
 | `MAX_CPUS` | `64` | Ceiling on CPUs per job |
 | `MAX_MEM_GB` | `256` | Ceiling on memory (GB) per job |
 | `MAX_HOURS` | `72` | Ceiling on job duration |
@@ -640,20 +640,20 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AUDIT_SOCKET` | `/run/iit-gpu/audit.sock` | Unix socket to the audit daemon |
-| `AUDIT_SPOOL` | `/run/iit-gpu/spool` | Fallback spool dir when the socket is unreachable |
-| `AUDIT_STATE` | `/var/lib/iit-gpu` | Directory for `audit.db`/`audit.jsonl` (daemon-side only) |
+| `AUDIT_SOCKET` | `/run/slurm-deck/audit.sock` | Unix socket to the audit daemon |
+| `AUDIT_SPOOL` | `/run/slurm-deck/spool` | Fallback spool dir when the socket is unreachable |
+| `AUDIT_STATE` | `/var/lib/slurm-deck` | Directory for `audit.db`/`audit.jsonl` (daemon-side only) |
 
 ---
 
 ## Audit logging
 
-`iit-gpu-audit.service` runs as `gpusync` (mode `0750` state dir — regular users cannot read or write it) and maintains:
+`slurm-deck-audit.service` runs as `gpusync` (mode `0750` state dir — regular users cannot read or write it) and maintains:
 
 | File | Format | Purpose |
 |---|---|---|
-| `/var/lib/iit-gpu/audit.db` | SQLite (WAL) | Queryable structured log |
-| `/var/lib/iit-gpu/audit.jsonl` | Newline-delimited JSON | Append-only human-readable log |
+| `/var/lib/slurm-deck/audit.db` | SQLite (WAL) | Queryable structured log |
+| `/var/lib/slurm-deck/audit.jsonl` | Newline-delimited JSON | Append-only human-readable log |
 
 Columns: `ts | user | session | action | detail | job_id | remote`. The **user** field is stamped authoritatively by the daemon via `SO_PEERCRED` on the Unix socket — a client cannot lie about who it is.
 
@@ -661,7 +661,7 @@ Every consequential action (login, job submit/cancel/hold/release/requeue, file 
 
 View logs: **Admin → Audit log** inside the tool, or as root/`gpusync`:
 ```bash
-sudo -u gpusync python3 /opt/iit-gpu/deploy/iit-gpu-log
+sudo -u gpusync python3 /opt/slurm-deck/deploy/slurm-deck-log
 ```
 
 ---
@@ -670,7 +670,7 @@ sudo -u gpusync python3 /opt/iit-gpu/deploy/iit-gpu-log
 
 Two independent mail paths — don't confuse them:
 
-1. **SLURM job-completion mail** (BEGIN/END/FAIL/REQUEUE/TIME_LIMIT) — SLURM's own `MailProg`, set to `/usr/local/bin/iit-gpu-mailer`, which runs as `SlurmUser` (typically the `slurm` account, **not root**). It sends via the Resend HTTP API if `RESEND_API_KEY` is readable, falling back to local `msmtp` otherwise.
+1. **SLURM job-completion mail** (BEGIN/END/FAIL/REQUEUE/TIME_LIMIT) — SLURM's own `MailProg`, set to `/usr/local/bin/slurm-deck-mailer`, which runs as `SlurmUser` (typically the `slurm` account, **not root**). It sends via the Resend HTTP API if `RESEND_API_KEY` is readable, falling back to local `msmtp` otherwise.
 2. **Transactional mail** (welcome email with initial password, login notification with source IP, JupyterLab session extended/expiring warnings) — sent by the TUI client asking the audit daemon (which alone can read `secrets.env`) to relay via the Resend API.
 
 Both paths respect a single cluster-wide kill switch: **Admin → Mail service: ON/OFF**, backed by a flag file every send-path checks before doing anything.
@@ -683,8 +683,8 @@ Setup: fill `RESEND_API_KEY` in `deploy/secrets.env` (root:gpusync, `0640`). No 
 
 By default SLURM gives a job the entire GPU it requests. This cluster instead splits the single physical GPU into **pods** (`gres/shard` — currently 4) so JupyterLab/inference-sized jobs can run concurrently:
 
-- **Nothing hardcodes the split.** The pod count is whatever `scontrol show node` currently reports for `gres/shard` (set by `Count=` in `gres.conf`), and per-pod CPU/RAM is floor-divided from the node's real `CPUTot`/`RealMemory` — both computed in `iitgpu/pods.py` (`pod_count()`, `pod_resources()`, `resources_for()`), the one place that math lives. Re-split the GPU in `gres.conf` and the tool follows on the next read, with no code change. On today's node (`CPUTot=32`, `RealMemory=62000`, `shard:4`) that works out to 4 pods of 8 CPU / 14 GB (2 GB reserved for the OS).
-- `render_*_sbatch()` (in `iitgpu/jobs.py`) emits `--gres=shard:N`, never `--gres=gpu:N`, for share-based tasks; CPU-only jobs omit `--gres` entirely.
+- **Nothing hardcodes the split.** The pod count is whatever `scontrol show node` currently reports for `gres/shard` (set by `Count=` in `gres.conf`), and per-pod CPU/RAM is floor-divided from the node's real `CPUTot`/`RealMemory` — both computed in `slurmdeck/pods.py` (`pod_count()`, `pod_resources()`, `resources_for()`), the one place that math lives. Re-split the GPU in `gres.conf` and the tool follows on the next read, with no code change. On today's node (`CPUTot=32`, `RealMemory=62000`, `shard:4`) that works out to 4 pods of 8 CPU / 14 GB (2 GB reserved for the OS).
+- `render_*_sbatch()` (in `slurmdeck/jobs.py`) emits `--gres=shard:N`, never `--gres=gpu:N`, for share-based tasks; CPU-only jobs omit `--gres` entirely.
 - One-pod tasks (notebook / interactive / inference) get one pod's worth of CPU and memory too — splitting the GPU alone is pointless if 2 jobs still fight over all the RAM.
 - `train`/`finetune`/`custom` tasks request every pod on the node by default (`jobs.TASK_POD_DEFAULTS`, the `"all"` sentinel).
 - When the live reading is unavailable the tool says so ("GPU availability unknown") and keeps its built-in one-pod defaults, rather than claiming a share it cannot verify.
@@ -698,15 +698,15 @@ By default SLURM gives a job the entire GPU it requests. This cluster instead sp
 Run the full TUI on any machine, no cluster needed — SLURM partitions, job submission, and the queue are simulated in memory.
 
 ```bash
-git clone <repo-url> && cd IIT-Secure-SLURM-Job-Gateway
+git clone <repo-url> && cd slurm-deck
 pip install rich questionary prompt_toolkit huggingface_hub
-python -m iitgpu --demo
-python -m iitgpu --demo --no-splash   # skip the ASCII splash
+python -m slurmdeck --demo
+python -m slurmdeck --demo --no-splash   # skip the ASCII splash
 ```
 
 Built-in self-check (jail logic, validators, audit fallback — no interactive prompts):
 ```bash
-python -m iitgpu --selftest
+python -m slurmdeck --selftest
 ```
 
 ---
@@ -717,14 +717,14 @@ python -m iitgpu --selftest
 pip install pytest rich questionary prompt_toolkit huggingface_hub
 pytest tests/ -q
 ```
-Run a specific file: `pytest tests/test_jobs.py -v`. The suite (786+ tests as of this writing) covers the path jail, validators, sbatch rendering, the wizard/review hub, the dashboard, the audit client and daemon, admin actions, mail, GPU sharding, and end-to-end demo-mode flows. Deploying via `deploy/redeploy-igm.sh` runs this suite as a hard gate before syncing anything live — **run it as the deploying user directly, not via `sudo`**, or three privilege-dependent tests spuriously fail because they're now running as root.
+Run a specific file: `pytest tests/test_jobs.py -v`. The suite (786+ tests as of this writing) covers the path jail, validators, sbatch rendering, the wizard/review hub, the dashboard, the audit client and daemon, admin actions, mail, GPU sharding, and end-to-end demo-mode flows. Deploying via `deploy/redeploy-slurm-deck.sh` runs this suite as a hard gate before syncing anything live — **run it as the deploying user directly, not via `sudo`**, or three privilege-dependent tests spuriously fail because they're now running as root.
 
 ---
 
 ## Project layout
 
 ```
-iitgpu/
+slurmdeck/
   __main__.py       Hardened entry point: signal traps, session logging, forced pw change, --demo/--selftest
   menu.py            Main menu + Jobs/Settings submenus
   wizard.py          New Job: 3-question intake → review hub → submit
@@ -760,15 +760,15 @@ iitgpu/
 
 deploy/
   install.sh                 Root installer (see Installation)
-  iit-gpu-adduser.sh          Provision a user on both nodes (see Adding and removing users)
-  iit-gpu-deluser.sh          Offboard a user from both nodes
-  audit_daemon.py             The iit-gpu-audit service: SQLite WAL + JSONL, users.db verbs
-  iit-gpu-audit.service       systemd unit for the audit daemon
-  iit-gpu-gateway             ForceCommand entry point: scp/rsync/sftp passthrough or launch the TUI
-  iit-gpu-mailer              Standalone SLURM MailProg (Resend, msmtp fallback)
-  iit-gpu-stats-writer        GPU/CPU/RAM stats writer (runs on the compute node)
-  iit-gpu-log                 Admin audit-log viewer
-  redeploy-igm.sh              Maintainer redeploy: test gate → fast-forward /opt/iit-gpu → resync binaries → restart daemon
+  slurm-deck-adduser.sh          Provision a user on both nodes (see Adding and removing users)
+  slurm-deck-deluser.sh          Offboard a user from both nodes
+  audit_daemon.py             The slurm-deck-audit service: SQLite WAL + JSONL, users.db verbs
+  slurm-deck-audit.service       systemd unit for the audit daemon
+  slurm-deck-gateway             ForceCommand entry point: scp/rsync/sftp passthrough or launch the TUI
+  slurm-deck-mailer              Standalone SLURM MailProg (Resend, msmtp fallback)
+  slurm-deck-stats-writer        GPU/CPU/RAM stats writer (runs on the compute node)
+  slurm-deck-log                 Admin audit-log viewer
+  redeploy-slurm-deck.sh              Maintainer redeploy: test gate → fast-forward /opt/slurm-deck → resync binaries → restart daemon
   sshd-gateway.conf            sshd drop-in (ForceCommand, forwarding rules — see Linux users & access model)
   sudoers-gateway               gpuusers → SLURM commands (legacy shared-user path)
   sudoers-gateway-admin          gpuadmins → node control, adduser/deluser, log-in-as-user
@@ -786,7 +786,7 @@ Every row below must fail for the deployment to be correctly locked down. Verify
 
 | Attack | Defence |
 |---|---|
-| `ssh user@host bash` | `ForceCommand` in the `gpuusers` `Match` block always runs `iit-gpu-gateway` → the TUI |
+| `ssh user@host bash` | `ForceCommand` in the `gpuusers` `Match` block always runs `slurm-deck-gateway` → the TUI |
 | `ssh -R`/remote or `-D` dynamic forwarding | Only `AllowTcpForwarding local` is granted — remote/dynamic forwarding is refused |
 | `ssh -L 8080:internal-host:80` to a host *other* than the compute node | `PermitOpen 192.168.122.1:*` restricts local forwards to the compute node only |
 | `ssh -A` (agent forwarding) | `AllowAgentForwarding no` |
@@ -798,7 +798,7 @@ Every row below must fail for the deployment to be correctly locked down. Verify
 | Reading/writing another user's `/shared/users/<other>` directly (bypassing the TUI) | Filesystem denies it independently: `2770`, owner-only + `gpuadmins` group — this is enforced by the kernel, not the Python code |
 | Typing a raw shell command in the Advanced SLURM shell | Allowlist: only `sbatch`, `squeue`, `scancel`, `sinfo`, `sacct`/`tail` execute; never `shell=True` |
 | `sbatch /etc/cron.d/malicious` in the shell | Path must pass the jail check before `sbatch` runs |
-| Directly reading/editing the audit DB or JSONL | `/var/lib/iit-gpu` is `0750`, owned by `gpusync:auditadmin` — unprivileged users get `Permission denied` |
+| Directly reading/editing the audit DB or JSONL | `/var/lib/slurm-deck` is `0750`, owned by `gpusync:auditadmin` — unprivileged users get `Permission denied` |
 | Submitting a job while the audit daemon is down and the spool dir is also gone | `log_or_block()` returns `False` → submission is refused |
 | Requesting far more GPU/CPU/mem/time than allowed | `clamp_int`/`clean_time_limit` silently cap to `MAX_*` server-side, regardless of what the client sends |
 | Setting `LD_PRELOAD` or other env vars via SSH | `PermitUserEnvironment no` (sshd) + the launcher's `env -i` strips the inherited environment entirely |
@@ -812,18 +812,18 @@ Every row below must fail for the deployment to be correctly locked down. Verify
 
 ## Day-2 operations (maintainers)
 
-The canonical source of truth for the running cluster is a dev clone on the login node (default `/home/slurmadmin/IIT-Secure-SLURM-Job-Gateway`); the live install is `/opt/iit-gpu`, kept in sync by:
+The canonical source of truth for the running cluster is a dev clone on the login node (default `/home/slurmadmin/slurm-deck`); the live install is `/opt/slurm-deck`, kept in sync by:
 
 ```bash
 cd <dev-clone>
 python3 -m pytest -q          # must pass before deploying
-bash deploy/redeploy-igm.sh   # run as the owning non-root user, NOT via sudo
+bash deploy/redeploy-slurm-deck.sh   # run as the owning non-root user, NOT via sudo
 ```
 
-`redeploy-igm.sh`:
+`redeploy-slurm-deck.sh`:
 1. Re-runs the full test suite as a hard gate (as **root**, this spuriously fails 3 privilege-dependent tests — run it as a normal sudo-capable user, not `sudo bash ...`)
-2. Fast-forwards `/opt/iit-gpu` from the dev clone (not from GitHub directly — see `IIT_GPU_SOURCE` if that ever needs to change)
-3. Re-syncs `site.env` permissions (must stay `0644`), `iit-gpu-mailer`/`iit-gpu-adduser`/`iit-gpu-deluser` into `/usr/local/bin`
-4. Restarts `iit-gpu-audit.service` so any daemon-side code change actually takes effect — **a source edit alone does nothing until this restart runs**; the daemon loads its Python once at start
+2. Fast-forwards `/opt/slurm-deck` from the dev clone (not from GitHub directly — see `SD_GPU_SOURCE` if that ever needs to change)
+3. Re-syncs `site.env` permissions (must stay `0644`), `slurm-deck-mailer`/`slurm-deck-adduser`/`slurm-deck-deluser` into `/usr/local/bin`
+4. Restarts `slurm-deck-audit.service` so any daemon-side code change actually takes effect — **a source edit alone does nothing until this restart runs**; the daemon loads its Python once at start
 
 If you change `slurm.conf`/`gres.conf` (e.g. GPU sharing), restart order matters: `slurmctld` (login node) **then** `slurmd` (compute node) — `SelectType` changes are not safely hot-reloadable via `scontrol reconfigure`, and restarting in the wrong order can leave the node falsely `DRAIN`ed (`gres/shard count reported lower than configured`); fix with `scontrol update NodeName=<node> State=RESUME` once both are confirmed restarted.

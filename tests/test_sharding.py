@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from iitgpu.jobs import (
+from slurmdeck.jobs import (
     JobSpec, TASK_POD_DEFAULTS, gpu_share_note, gres_directive,
     render_sbatch, render_notebook_sbatch, resource_defaults,
 )
-from iitgpu.pods import pod_count
-from iitgpu.slurm import NodeStats
+from slurmdeck.pods import pod_count
+from slurmdeck.slurm import NodeStats
 
 NODE_CPUS = 32
 NODE_MEM_GB = 60      # RealMemory=62000 MB
@@ -129,10 +129,10 @@ def test_shard_request_is_not_measured_against_whole_gpu_limit(monkeypatch):
     reads it live now."""
     monkeypatch.setenv("MAX_GPUS", "1")
     monkeypatch.setenv("MAX_GPU_SHARDS", "4")
-    import importlib, iitgpu.validate as v
+    import importlib, slurmdeck.validate as v
     importlib.reload(v)
     try:
-        with patch("iitgpu.slurm.get_node_stats", return_value=_stats()):
+        with patch("slurmdeck.slurm.get_node_stats", return_value=_stats()):
             errors = v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice")
         assert not any("GPU" in e for e in errors), errors
     finally:
@@ -141,10 +141,10 @@ def test_shard_request_is_not_measured_against_whole_gpu_limit(monkeypatch):
 
 def test_shard_request_beyond_capacity_is_rejected(monkeypatch):
     monkeypatch.setenv("MAX_GPU_SHARDS", "4")
-    import importlib, iitgpu.validate as v
+    import importlib, slurmdeck.validate as v
     importlib.reload(v)
     try:
-        with patch("iitgpu.slurm.get_node_stats", return_value=_stats()):
+        with patch("slurmdeck.slurm.get_node_stats", return_value=_stats()):
             errors = v.validate_sbatch("#SBATCH --gres=shard:9\n", "alice")
         assert any("pods" in e for e in errors), errors
     finally:
@@ -187,7 +187,7 @@ def test_whole_card_tasks_still_fit_on_the_node():
 
 
 def _nb_script(tmp_path):
-    from iitgpu.jobs import JobSpec, render_notebook_sbatch
+    from slurmdeck.jobs import JobSpec, render_notebook_sbatch
     spec = JobSpec(job_name="notebook", partition="gpu", gpu_shards=1, cpus=8,
                    mem_gb=14, time_limit="08:00:00", run_command="",
                    task_type="notebook", conda_env="/shared/envs/data-science")
@@ -198,7 +198,7 @@ def _nb_script(tmp_path):
 def test_notebook_is_rooted_at_the_users_own_folder(tmp_path):
     """Serving /shared made the per-user jail meaningless in the notebook."""
     script = _nb_script(tmp_path)
-    assert "--ServerApp.root_dir=$IIT_USER_ROOT" in script
+    assert "--ServerApp.root_dir=$SD_USER_ROOT" in script
     assert "--notebook-dir=/shared" not in script
 
 
@@ -225,19 +225,19 @@ def test_symlink_creation_guards_existing_non_symlink(tmp_path):
     script = _nb_script(tmp_path)
     # Every asset link must be preceded by a symlink-or-absent guard, not a
     # bare unconditional ln -sfn.
-    assert '[ -L "$_iit_target" ] || [ ! -e "$_iit_target" ]' in script
+    assert '[ -L "$_sd_target" ] || [ ! -e "$_sd_target" ]' in script
     assert "WARNING" in script and "already exists and is not a symlink" in script
     # And the guard must actually wrap the ln -sfn call, not just appear
     # somewhere else in the script.
     for asset in ("models", "envs", "data", "datasets"):
         guarded = (
-            f'if [ -L "$_iit_target" ] || [ ! -e "$_iit_target" ]; then\n'
-            f'    ln -sfn /shared/{asset} "$_iit_target"'
+            f'if [ -L "$_sd_target" ] || [ ! -e "$_sd_target" ]; then\n'
+            f'    ln -sfn /shared/{asset} "$_sd_target"'
         )
         assert guarded in script, f"{asset} link must be guarded, not unconditional"
 
 
 def test_notebook_docstring_does_not_claim_loopback_only(tmp_path):
     """It binds the routable NodeAddr; a false security comment is a trap."""
-    from iitgpu.jobs import render_notebook_sbatch
+    from slurmdeck.jobs import render_notebook_sbatch
     assert "127.0.0.1 only" not in (render_notebook_sbatch.__doc__ or "")

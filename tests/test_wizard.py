@@ -8,8 +8,8 @@ UnboundLocalError: "cannot access local variable 'panel'...". These tests guard
 against that class of bug: a module-level import must never be shadowed by a
 function-local of the same name.
 """
-import iitgpu.wizard as wizard
-from iitgpu.ui import BACK
+import slurmdeck.wizard as wizard
+from slurmdeck.ui import BACK
 
 
 # Names imported at module top in wizard.py that must stay global inside functions.
@@ -59,7 +59,7 @@ from unittest.mock import patch, MagicMock
 
 def test_data_path_exported_in_sbatch_when_set(tmp_path):
     """render_sbatch() includes 'export DATA_PATH=...' when data_path is set."""
-    from iitgpu.jobs import JobSpec, render_sbatch
+    from slurmdeck.jobs import JobSpec, render_sbatch
 
     spec = JobSpec(
         job_name="test_job",
@@ -85,7 +85,7 @@ def test_data_path_exported_in_sbatch_when_set(tmp_path):
 
 def test_data_path_not_in_sbatch_when_not_set(tmp_path):
     """render_sbatch() omits 'export DATA_PATH' when data_path is empty."""
-    from iitgpu.jobs import JobSpec, render_sbatch
+    from slurmdeck.jobs import JobSpec, render_sbatch
 
     spec = JobSpec(
         job_name="test_job",
@@ -104,7 +104,7 @@ def test_data_path_not_in_sbatch_when_not_set(tmp_path):
 
 def test_rerun_parses_sbatch_fields(tmp_path):
     """_parse_sbatch correctly extracts all common SBATCH fields."""
-    from iitgpu.monitor import _parse_sbatch
+    from slurmdeck.monitor import _parse_sbatch
 
     sbatch = """\
 #!/bin/bash
@@ -138,7 +138,7 @@ python /shared/testuser/scripts/train.py --epochs 10
 
 def test_rerun_parses_container_image_from_sbatch(tmp_path):
     """_parse_sbatch extracts the container image path and leaves conda_env empty."""
-    from iitgpu.monitor import _parse_sbatch
+    from slurmdeck.monitor import _parse_sbatch
 
     sbatch = """\
 #!/bin/bash
@@ -162,7 +162,7 @@ def test_wizard_accepts_prefill_without_error(monkeypatch, tmp_path):
     Both prefill shapes the rerun path can produce: without a script_path the
     flow stops at the script intake, with one it goes straight to the hub.
     """
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     # Mock all questionary prompts to bail out immediately
     monkeypatch.setattr(
@@ -196,15 +196,15 @@ def test_wizard_accepts_prefill_without_error(monkeypatch, tmp_path):
 
 def test_mail_user_set_from_users_db_when_mta_present(tmp_path):
     """When MTA is available and users.db has an email, mail_user is auto-populated."""
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
-    with patch("iitgpu.notify.mta_present", return_value=True), \
-         patch("iitgpu.daemonclient.email_for", return_value="alice@uni.edu"):
-        from iitgpu.notify import mta_present
-        from iitgpu import daemonclient
+    with patch("slurmdeck.notify.mta_present", return_value=True), \
+         patch("slurmdeck.daemonclient.email_for", return_value="alice@uni.edu"):
+        from slurmdeck.notify import mta_present
+        from slurmdeck import daemonclient
         if mta_present():
             email = daemonclient.email_for("alice")
             if email:
@@ -218,13 +218,13 @@ def test_mail_user_set_from_users_db_when_mta_present(tmp_path):
 
 def test_mail_user_not_set_when_mta_absent(tmp_path):
     """When no MTA is present, mail_user stays empty even if users.db has an email."""
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
-    with patch("iitgpu.notify.mta_present", return_value=False):
-        from iitgpu.notify import mta_present
+    with patch("slurmdeck.notify.mta_present", return_value=False):
+        from slurmdeck.notify import mta_present
         if mta_present():
             spec.mail_user = "should-not-be-set@example.com"
 
@@ -235,15 +235,15 @@ def test_mail_user_not_set_when_mta_absent(tmp_path):
 
 def test_mail_user_not_set_when_no_email_in_db(tmp_path):
     """When MTA is present but user has no email registered, mail_user stays empty."""
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(job_name="j", partition="gpu", gpu_shards=1, cpus=4, mem_gb=8,
                    time_limit="01:00:00", run_command="python x.py")
 
-    with patch("iitgpu.notify.mta_present", return_value=True), \
-         patch("iitgpu.daemonclient.email_for", return_value=None):
-        from iitgpu.notify import mta_present
-        from iitgpu import daemonclient
+    with patch("slurmdeck.notify.mta_present", return_value=True), \
+         patch("slurmdeck.daemonclient.email_for", return_value=None):
+        from slurmdeck.notify import mta_present
+        from slurmdeck import daemonclient
         if mta_present():
             email = daemonclient.email_for("newuser")
             if email:
@@ -266,8 +266,8 @@ def _select_returning(value):
 def test_browse_data_folder_uses_supplied_jail(tmp_path, monkeypatch):
     """A regular user's browse jail must gate selection — picking a folder inside
     their own area is allowed; the same browser must refuse paths outside it."""
-    import iitgpu.wizard as wiz
-    from iitgpu.validate import in_user_browse_jail
+    import slurmdeck.wizard as wiz
+    from slurmdeck.validate import in_user_browse_jail
 
     nfs = str(tmp_path)
     alice_dir = Path(nfs) / "users" / "alice"
@@ -288,8 +288,8 @@ def test_browse_data_folder_uses_supplied_jail(tmp_path, monkeypatch):
 
 def test_browse_script_uses_supplied_jail(tmp_path, monkeypatch):
     """The script picker must likewise refuse a file outside the user's jail."""
-    import iitgpu.wizard as wiz
-    from iitgpu.validate import in_user_browse_jail
+    import slurmdeck.wizard as wiz
+    from slurmdeck.validate import in_user_browse_jail
 
     nfs = str(tmp_path)
     alice_dir = Path(nfs) / "users" / "alice"
@@ -315,7 +315,7 @@ def test_browse_helpers_default_jail_is_global_in_jail():
     (Identity-free check: other tests may reload modules, which would rebind the
     function object while keeping the same semantics.)"""
     import inspect
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     for fn in (wiz._browse_data_folder, wiz._browse_script):
         default = inspect.signature(fn).parameters["jail"].default
@@ -324,7 +324,7 @@ def test_browse_helpers_default_jail_is_global_in_jail():
 
 
 def test_valid_pkg_tokens_keeps_specs_drops_shell_metachars():
-    from iitgpu.wizard import _valid_pkg_tokens
+    from slurmdeck.wizard import _valid_pkg_tokens
     assert _valid_pkg_tokens("tqdm wfdb==4.1 torch>=2.0 scikit-learn[extra]") == \
         ["tqdm", "wfdb==4.1", "torch>=2.0", "scikit-learn[extra]"]
     for bad in ["a;b", "$(x)", "a&&b", "../x", "a|b", "`x`"]:
@@ -334,7 +334,7 @@ def test_valid_pkg_tokens_keeps_specs_drops_shell_metachars():
 def test_notebook_deps_prompt_autodetects_requirements(tmp_path, monkeypatch):
     """A requirements.txt in the notebook's project root is auto-detected and,
     when chosen, returned for pip-install before the run."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
     proj = tmp_path / "proj"
     (proj / "notebooks").mkdir(parents=True)
     nb = proj / "notebooks" / "run.ipynb"
@@ -350,7 +350,7 @@ def test_notebook_deps_prompt_autodetects_requirements(tmp_path, monkeypatch):
 
 
 def test_notebook_deps_prompt_skip_returns_empty(tmp_path, monkeypatch):
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
     nb = tmp_path / "run.ipynb"
     nb.write_text("{}")
     monkeypatch.setattr("questionary.select",
@@ -361,7 +361,7 @@ def test_notebook_deps_prompt_skip_returns_empty(tmp_path, monkeypatch):
 def test_notebook_deps_prompt_no_notebook_skips_autodetect(tmp_path, monkeypatch):
     """For the JupyterLab flow (no notebook path) there is no auto-detect choice;
     typing packages still works."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
     seen = {}
 
     def _cap(*a, **k):
@@ -379,7 +379,7 @@ def test_notebook_deps_prompt_no_notebook_skips_autodetect(tmp_path, monkeypatch
 # ── Step counter and UX fixes ──────────────────────────────────────────────────
 
 def test_notebook_deps_custom_question(tmp_path, monkeypatch):
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
     seen = {}
     def _cap_select(*a, **k):
         seen["question"] = a[0] if a else ""
@@ -391,7 +391,7 @@ def test_notebook_deps_custom_question(tmp_path, monkeypatch):
 
 
 def test_notebook_deps_default_question(tmp_path, monkeypatch):
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
     seen = {}
     def _cap_select(*a, **k):
         seen["question"] = a[0] if a else ""
@@ -415,7 +415,7 @@ def test_own_sbatch_lives_under_other_and_stops_interrupting(monkeypatch):
     """The own-.sbatch bypass used to stop every user mid-flow with a confirm
     they mostly answered "no" to. It now sits under "Other" — two selects for
     the people who want it, invisible to everyone else."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     confirms_seen = []
     def _cap_confirm(msg, **kw):
@@ -440,7 +440,7 @@ def test_own_sbatch_lives_under_other_and_stops_interrupting(monkeypatch):
 
 
 def test_settings_menu_no_duplicates():
-    import iitgpu.menu as m
+    import slurmdeck.menu as m
     import inspect
     src = inspect.getsource(m._settings_menu)
     assert '"Cluster status"' not in src
@@ -454,7 +454,7 @@ def test_settings_menu_no_duplicates():
 # ── VRAM guardrail ────────────────────────────────────────────────────────────
 
 def _make_stats(gpu_mem_used_mb: int = 12288, gpu_mem_total_mb: int = 32768):
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     return NodeStats(
         state="ALLOCATED", cpu_load=1.0, cpu_total=32, cpu_alloc=16,
         mem_total_mb=131072, mem_alloc_mb=65536, gpu_total=1, gpu_alloc=1,
@@ -472,7 +472,7 @@ def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
     refused the job on the strength of that guess. _vram_check now states the
     situation and always proceeds, even with the card nearly full."""
     from unittest.mock import patch
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     # 30 GB in use of 32 GB — the old gate would have blocked here.
     stats = _make_stats(gpu_mem_used_mb=30720, gpu_mem_total_mb=32768)
@@ -480,7 +480,7 @@ def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
     def _no_prompt(*a, **kw):
         raise AssertionError("_vram_check must not ask the user anything")
 
-    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+    with patch("slurmdeck.wizard.get_node_stats", return_value=stats), \
          patch("questionary.text", side_effect=_no_prompt), \
          patch("questionary.confirm", side_effect=_no_prompt):
         result = wiz._vram_check()
@@ -488,7 +488,7 @@ def test_vram_check_no_longer_blocks_and_never_prompts(monkeypatch):
     assert result is True
 
     # …and with no live stats at all, which used to be its own early return.
-    with patch("iitgpu.wizard.get_node_stats", return_value=None), \
+    with patch("slurmdeck.wizard.get_node_stats", return_value=None), \
          patch("questionary.text", side_effect=_no_prompt), \
          patch("questionary.confirm", side_effect=_no_prompt):
         assert wiz._vram_check() is True
@@ -498,10 +498,10 @@ def test_vram_check_reports_the_fair_share_without_asking(capsys):
     """What survives of the check is the useful half: the live reading and what
     one slice's fair share of the card actually is, printed, not asked."""
     from unittest.mock import patch
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     stats = _make_stats(gpu_mem_used_mb=0, gpu_mem_total_mb=32768)
-    with patch("iitgpu.wizard.get_node_stats", return_value=stats), \
+    with patch("slurmdeck.wizard.get_node_stats", return_value=stats), \
          patch("questionary.text", side_effect=AssertionError):
         assert wiz._vram_check() is True
 
@@ -513,7 +513,7 @@ def test_vram_check_reports_the_fair_share_without_asking(capsys):
 def test_vram_check_present_in_wizard_source():
     """_vram_check must be called in run_wizard for both submission paths."""
     import inspect
-    from iitgpu import wizard
+    from slurmdeck import wizard
     src = inspect.getsource(wizard.run_wizard)
     assert src.count("_vram_check") >= 2, (
         f"Expected _vram_check called at least twice in run_wizard, found {src.count('_vram_check')}"
@@ -522,7 +522,7 @@ def test_vram_check_present_in_wizard_source():
 
 def test_gpu_share_note_describes_a_partial_card():
     """A one-slice job must say so — resource sizing changed and nothing said."""
-    from iitgpu.jobs import gpu_share_note
+    from slurmdeck.jobs import gpu_share_note
     note = gpu_share_note(1, 4)
     assert "1/4" in note
     assert "left for others" in note
@@ -531,14 +531,14 @@ def test_gpu_share_note_describes_a_partial_card():
 def test_gpu_share_note_is_used_by_the_wizard():
     """Defined-but-unused is worse than absent: it reads as done."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "gpu_share_note" in src, "wizard must show the GPU share to the user"
 
 
 def test_vram_prompt_states_the_budget_is_shared_and_unenforced():
     """Slices schedule, they do not isolate — two jobs can still OOM each other."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     start = src.index("def _vram_check")
     body = src[start:start + 3000]
     assert "shared" in body.lower(), "prompt must say VRAM is shared"
@@ -548,7 +548,7 @@ def test_vram_prompt_states_the_budget_is_shared_and_unenforced():
 def test_notebook_submit_audits_the_interactive_session():
     """A notebook is a full execution environment; the trail must show it started."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "notebook_session_start" in src
     idx = src.index("notebook_session_start")
     window = src[idx - 200:idx + 300]
@@ -560,7 +560,7 @@ def test_notebook_post_submit_waits_and_shows_connect_card():
     """After submit the TUI must wait for readiness and print the Connect card
     parsed from the job's own output — not reconstruct tunnel details."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "_post_submit_notebook" in src
     i = src.index("def _post_submit_notebook")
     body = src[i:i + 2500]
@@ -572,9 +572,9 @@ def test_post_submit_ready_shows_card(monkeypatch, tmp_path):
     """When the job is ready and its .out already parses, show the Connect card
     built from the job's own output — not a reconstructed tunnel hint."""
     from rich.console import Console
-    import iitgpu.connect as connect
-    import iitgpu.ui as ui
-    from iitgpu.wizard import _post_submit_notebook
+    import slurmdeck.connect as connect
+    import slurmdeck.ui as ui
+    from slurmdeck.wizard import _post_submit_notebook
 
     sample_out = (
         "=================================================\n"
@@ -604,9 +604,9 @@ def test_post_submit_ready_race_never_says_still_starting(monkeypatch, tmp_path)
     be reported as 'still starting' — that's factually wrong. It must point
     the user at the dashboard's Connect card instead."""
     from rich.console import Console
-    import iitgpu.connect as connect
-    import iitgpu.ui as ui
-    from iitgpu.wizard import _post_submit_notebook
+    import slurmdeck.connect as connect
+    import slurmdeck.ui as ui
+    from slurmdeck.wizard import _post_submit_notebook
 
     (tmp_path / "slurm-1.out").write_text("JupyterLab is starting on the GPU node.\n")
 
@@ -626,9 +626,9 @@ def test_post_submit_gone_tails_stderr(monkeypatch, tmp_path):
     """Crash output lands in .err (the launcher is un-redirected there), so a
     'gone' state must tail .err, not just .out."""
     from rich.console import Console
-    import iitgpu.connect as connect
-    import iitgpu.ui as ui
-    from iitgpu.wizard import _post_submit_notebook
+    import slurmdeck.connect as connect
+    import slurmdeck.ui as ui
+    from slurmdeck.wizard import _post_submit_notebook
 
     (tmp_path / "slurm-1.out").write_text("")
     (tmp_path / "slurm-1.err").write_text("ERROR: JupyterLab is missing\n")
@@ -647,7 +647,7 @@ def test_post_submit_gone_tails_stderr(monkeypatch, tmp_path):
 
 def test_wizard_offers_three_intents_not_seven_task_types():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "Open JupyterLab" in src
     assert "Run a script or notebook" in src
     assert "Open a shell on the GPU node" in src
@@ -656,7 +656,7 @@ def test_wizard_offers_three_intents_not_seven_task_types():
 
 def test_wizard_no_longer_quizzes_vram_but_keeps_the_wording():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "Estimated VRAM your job needs" not in src
     i = src.index("def _vram_check")
     body = src[i:i + 1800]
@@ -665,7 +665,7 @@ def test_wizard_no_longer_quizzes_vram_but_keeps_the_wording():
 
 def test_wizard_hands_off_to_the_hub():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     assert "run_hub" in src and "default_spec" in src
     assert "recent_scripts" in src and "autocomplete" in src
 
@@ -675,7 +675,7 @@ def test_parse_sbatch_handles_a_quoted_script_path():
     with a space in its name comes back through the rerun parser quoted. A
     whitespace split hands back "'/a/my" — a path that does not exist, offered
     to the user as the thing they are about to re-run."""
-    from iitgpu.monitor import _parse_sbatch
+    from slurmdeck.monitor import _parse_sbatch
 
     sbatch = (
         "#!/bin/bash\n"
@@ -693,7 +693,7 @@ def test_parse_sbatch_handles_a_quoted_script_path():
 
 def test_parse_sbatch_unquoted_path_still_works():
     """The common case must not regress: no quotes, no change."""
-    from iitgpu.monitor import _parse_sbatch
+    from slurmdeck.monitor import _parse_sbatch
 
     sbatch = ("#!/bin/bash\n"
               "cd /shared/jobs/alice/j\n"
@@ -705,7 +705,7 @@ def test_parse_sbatch_unquoted_path_still_works():
 
 def test_parse_sbatch_survives_unbalanced_quotes():
     """A hand-edited sbatch must not take the rerun browser down with it."""
-    from iitgpu.monitor import _parse_sbatch
+    from slurmdeck.monitor import _parse_sbatch
 
     result = _parse_sbatch("#!/bin/bash\ncd /x\npython3 '/broken/quote.py --lr 3\n")
     assert "script_path" not in result       # unparseable, so not offered
@@ -716,10 +716,10 @@ def test_rerun_prefill_validates_the_script_before_using_it(tmp_path, monkeypatc
     """A path lifted out of an old sbatch has had no more validation than a
     typed one. When it no longer resolves, the wizard must fall through to the
     normal intake instead of carrying a dead path into the hub."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+    monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
 
     asked = []
 
@@ -744,10 +744,10 @@ def test_rerun_prefill_validates_the_script_before_using_it(tmp_path, monkeypatc
 
 def test_rerun_prefill_keeps_a_script_that_is_still_there(tmp_path, monkeypatch):
     """The good case: a script that still exists goes straight to the hub."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+    monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
     import getpass
     udir = tmp_path / "users" / getpass.getuser()
     udir.mkdir(parents=True)
@@ -770,10 +770,10 @@ def test_rerun_prefill_keeps_a_script_that_is_still_there(tmp_path, monkeypatch)
 def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch):
     """End-to-end through the real run_wizard: intent select -> script intake ->
     hub, with every prompt driven. Cancels at the hub so nothing is submitted."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+    monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
     import getpass
     udir = tmp_path / "users" / getpass.getuser()
     udir.mkdir(parents=True)
@@ -788,7 +788,7 @@ def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch
                         lambda *a, **kw: MagicMock(ask=lambda: str(script)))
     monkeypatch.setattr("questionary.text", lambda *a, **kw: MagicMock(ask=lambda: ""))
     monkeypatch.setattr("questionary.confirm", lambda *a, **kw: MagicMock(ask=lambda: False))
-    monkeypatch.setattr("iitgpu.review.get_node_stats", lambda *a, **kw: None)
+    monkeypatch.setattr("slurmdeck.review.get_node_stats", lambda *a, **kw: None)
     # No reachable cluster, deterministically — the point of the cpus/mem_gb
     # assertions below is what the wizard does when scontrol tells it nothing.
     monkeypatch.setattr(wiz, "get_node_stats", lambda *a, **kw: None)
@@ -823,7 +823,7 @@ def test_batch_flow_reaches_the_hub_with_the_picked_script(tmp_path, monkeypatch
 def test_other_back_returns_to_the_intent_list_not_out_of_the_wizard(monkeypatch):
     """"back" that drops you to the main menu is not back, it is cancel. The
     intent question must be asked again."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     questions = []
 
@@ -842,7 +842,7 @@ def test_other_back_returns_to_the_intent_list_not_out_of_the_wizard(monkeypatch
 
 def test_other_template_cancel_returns_to_the_intent_list(monkeypatch):
     """Same for backing out of the template picker."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     questions = []
 
@@ -852,7 +852,7 @@ def test_other_template_cancel_returns_to_the_intent_list(monkeypatch):
         return MagicMock(ask=lambda: answers[min(len(questions), 3) - 1])
 
     monkeypatch.setattr("questionary.select", _sel)
-    monkeypatch.setattr("iitgpu.templates.pick_template", lambda cfg: None)
+    monkeypatch.setattr("slurmdeck.templates.pick_template", lambda cfg: None)
     wiz.run_wizard()
 
     intent_asked = [q for q in questions if q.startswith("What do you want to do?")]
@@ -874,7 +874,7 @@ class _Cfg:
 def test_preview_round_trips_a_batch_spec(tmp_path):
     """I4: "view generated sbatch" now renders through the same to_job_spec +
     renderer + run-command builder the submit path uses."""
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     ls.script = "/shared/users/u/train.py"
@@ -886,7 +886,7 @@ def test_preview_round_trips_a_batch_spec(tmp_path):
 
 
 def test_preview_round_trips_a_notebook_spec(tmp_path):
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("notebook")
     ls.conda_env = "/shared/envs/data-science"
@@ -898,7 +898,7 @@ def test_preview_round_trips_a_notebook_spec(tmp_path):
 
 def test_preview_writes_nothing_to_disk(tmp_path):
     """Display only — the real job folder is assigned at submit."""
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     ls.script = "/shared/users/u/train.py"
@@ -917,7 +917,7 @@ def test_default_env_points_at_the_prebuilt_data_science_env(tmp_path):
     """I2: default_spec leaves conda_env empty, which rendered as "(not set)"
     and launched JupyterLab on system python for anyone who accepted the
     defaults. The prebuilt env is now the default when it is installed."""
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     (tmp_path / "envs" / "data-science").mkdir(parents=True)
     for intent in ("notebook", "batch"):
@@ -929,7 +929,7 @@ def test_default_env_points_at_the_prebuilt_data_science_env(tmp_path):
 
 def test_default_env_is_left_empty_when_the_env_is_not_installed(tmp_path):
     """Absent env must not error — the empty default is still a valid launch."""
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("notebook")
     wizard._apply_default_env(ls, _Cfg(tmp_path))
@@ -937,7 +937,7 @@ def test_default_env_is_left_empty_when_the_env_is_not_installed(tmp_path):
 
 
 def test_default_env_skips_a_shell_and_never_overwrites_a_choice(tmp_path):
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     (tmp_path / "envs" / "data-science").mkdir(parents=True)
 
@@ -968,7 +968,7 @@ def test_post_submit_wait_is_interruptible_and_cannot_crash_the_session():
     should_stop, and any interrupt that slips past it must still be caught
     rather than propagate out of this function."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     i = src.index("def _post_submit_notebook")
     body = src[i:i + 2000]
     assert "should_stop=" in body
@@ -980,7 +980,7 @@ def test_wait_or_keypress_returns_bool_without_a_tty(monkeypatch):
     """Non-interactive contexts (piped input, CI) must degrade to a plain
     sleep rather than raising, matching splash.py's established pattern."""
     import sys
-    import iitgpu.wizard as W
+    import slurmdeck.wizard as W
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr("time.sleep", lambda s: None)
     assert W._wait_or_keypress(0.01) is False
@@ -992,7 +992,7 @@ def test_own_sbatch_auto_opens_the_dashboard_no_confirm(monkeypatch, tmp_path):
     confirm gate were still in the code path, calling .ask() on the real
     (un-mocked) prompt in a non-interactive test run raises, so this proves
     the gate is gone structurally, not just that its old text is absent."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     monkeypatch.setattr(wiz, "_tier3_own_script", lambda user, cfg: "#!/bin/bash\necho hi\n")
     monkeypatch.setattr(wiz.auditclient, "log_or_block", lambda *a, **kw: True)
@@ -1007,7 +1007,7 @@ def test_own_sbatch_auto_opens_the_dashboard_no_confirm(monkeypatch, tmp_path):
         def run_dashboard(job_id=None):
             seen["job_id"] = job_id
 
-    monkeypatch.setitem(__import__("sys").modules, "iitgpu.dashboard", _FakeDashboardModule)
+    monkeypatch.setitem(__import__("sys").modules, "slurmdeck.dashboard", _FakeDashboardModule)
 
     cfg = type("FakeCfg", (), {"partition": "gpu"})()
     wiz._run_own_sbatch(cfg, "u", str(tmp_path))
@@ -1020,7 +1020,7 @@ def test_batch_submit_success_reaches_dashboard_with_no_confirm_between():
     no questionary.confirm() gate in between — a structural check, not a
     grep for the old prompt's wording."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     i = src.index('auditclient.log("job_submitted_ok", detail=job_name, job_id=result)')
     j = src.index("run_dashboard(job_id=result)", i)
     between = src[i:j]
@@ -1030,7 +1030,7 @@ def test_batch_submit_success_reaches_dashboard_with_no_confirm_between():
 
 def test_notebook_submit_success_reaches_dashboard_with_no_confirm_between():
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "iitgpu" / "wizard.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "slurmdeck" / "wizard.py").read_text()
     i = src.index("_post_submit_notebook(result, folder)")
     j = src.index("run_dashboard(job_id=result)", i)
     between = src[i:j]
@@ -1050,7 +1050,7 @@ def test_finetune_choice_offered_between_batch_and_shell():
 def test_finetune_env_prefers_llm_finetune_over_data_science(tmp_path):
     (tmp_path / "envs" / "data-science").mkdir(parents=True)
     (tmp_path / "envs" / "llm-finetune").mkdir(parents=True)
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     wizard._apply_default_env(ls, _Cfg(tmp_path), prefer="llm-finetune")
@@ -1060,7 +1060,7 @@ def test_finetune_env_prefers_llm_finetune_over_data_science(tmp_path):
 def test_finetune_env_falls_back_when_the_preferred_env_is_missing(tmp_path):
     """Only data-science installed — prefer= must not leave conda_env empty."""
     (tmp_path / "envs" / "data-science").mkdir(parents=True)
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     wizard._apply_default_env(ls, _Cfg(tmp_path), prefer="llm-finetune")
@@ -1070,7 +1070,7 @@ def test_finetune_env_falls_back_when_the_preferred_env_is_missing(tmp_path):
 def test_default_env_without_prefer_is_unchanged(tmp_path):
     """prefer=None (every existing call site) must behave exactly as before."""
     (tmp_path / "envs" / "data-science").mkdir(parents=True)
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     wizard._apply_default_env(ls, _Cfg(tmp_path))
@@ -1078,19 +1078,19 @@ def test_default_env_without_prefer_is_unchanged(tmp_path):
 
 
 def test_pick_finetune_model_registry(monkeypatch):
-    from iitgpu.models import ModelEntry
+    from slurmdeck.models import ModelEntry
 
     entry = ModelEntry(name="mistral", source="huggingface",
                        path="/shared/models/mistral", added_at="2026-01-01",
                        added_by="u", size_mb=1.0)
     monkeypatch.setattr("questionary.select", _select_returning("Pick from registry"))
-    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: entry)
+    monkeypatch.setattr("slurmdeck.models.pick_model", lambda cfg: entry)
     assert wizard._pick_finetune_model(object()) == "/shared/models/mistral"
 
 
 def test_pick_finetune_model_registry_cancelled_returns_empty(monkeypatch):
     monkeypatch.setattr("questionary.select", _select_returning("Pick from registry"))
-    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: None)
+    monkeypatch.setattr("slurmdeck.models.pick_model", lambda cfg: None)
     assert wizard._pick_finetune_model(object()) == ""
 
 
@@ -1100,7 +1100,7 @@ def test_pick_finetune_model_huggingface_download(monkeypatch):
 
     monkeypatch.setattr("questionary.select", _select_returning("Download from HuggingFace"))
     monkeypatch.setattr("questionary.text", _text)
-    monkeypatch.setattr("iitgpu.models.download_hf",
+    monkeypatch.setattr("slurmdeck.models.download_hf",
                         lambda cfg, repo_id: (True, "/shared/models/Mistral-7B-v0.1"))
     assert wizard._pick_finetune_model(object()) == "/shared/models/Mistral-7B-v0.1"
 
@@ -1146,7 +1146,7 @@ def test_finetune_branch_sets_an_eight_hour_time_limit(monkeypatch):
     default (default_spec("batch") runs first). Drives the real run_wizard
     up through the point the finetune branch configures ls, then cancels via
     an unresolvable script prompt so nothing further executes."""
-    import iitgpu.wizard as wiz
+    import slurmdeck.wizard as wiz
 
     selects = iter([wiz._FINETUNE_CHOICE])
     monkeypatch.setattr("questionary.select",

@@ -1,9 +1,9 @@
 """Pure pod-sizing math: cpu/mem/VRAM per pod, derived live from NodeStats,
 never from a hardcoded constant."""
-from iitgpu.pods import (PodSize, estimated_vram_gb, fits_new_pod_count,
+from slurmdeck.pods import (PodSize, estimated_vram_gb, fits_new_pod_count,
                           pod_count, pod_count_known, pod_resources,
                           resources_for)
-from iitgpu.slurm import NodeStats
+from slurmdeck.slurm import NodeStats
 
 
 def _stats(shard_total=4, shard_alloc=0, cpu_total=32, mem_total_mb=62000,

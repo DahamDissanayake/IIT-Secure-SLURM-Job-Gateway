@@ -6,7 +6,7 @@ no urllib, and must route every send through _daemon_mail.
 """
 from unittest.mock import patch
 import pytest
-from iitgpu import mailer
+from slurmdeck import mailer
 
 
 def _capture():
@@ -15,7 +15,7 @@ def _capture():
     def fake(to, subject, html, bcc=None, kind="generic", ip=""):
         store.update(to=to, subject=subject, html=html, bcc=bcc, kind=kind, ip=ip)
         return True, "sent"
-    return patch("iitgpu.mailer._daemon_mail", side_effect=fake), store
+    return patch("slurmdeck.mailer._daemon_mail", side_effect=fake), store
 
 
 class _SyncThread:
@@ -103,13 +103,13 @@ def test_welcome_signature_has_password_param():
 
 
 def test_welcome_returns_tuple():
-    with patch("iitgpu.mailer._daemon_mail", return_value=(True, "sent")):
+    with patch("slurmdeck.mailer._daemon_mail", return_value=(True, "sent")):
         result = mailer.send_welcome("alice", "alice@iit.lk")
     assert result == (True, "sent")
 
 
 def test_welcome_propagates_failure():
-    with patch("iitgpu.mailer._daemon_mail", return_value=(False, "HTTP 422")):
+    with patch("slurmdeck.mailer._daemon_mail", return_value=(False, "HTTP 422")):
         ok, msg = mailer.send_welcome("alice", "alice@iit.lk")
     assert ok is False and "422" in msg
 
@@ -136,7 +136,7 @@ def test_offboard_no_bcc():
 
 def test_login_kind_and_ip():
     ctx, store = _capture()
-    with ctx, patch("iitgpu.mailer.Thread", _SyncThread):
+    with ctx, patch("slurmdeck.mailer.Thread", _SyncThread):
         mailer.send_login_notification("alice", "alice@iit.lk", "10.35.4.9")
     assert store["kind"] == "login"
     assert store["ip"] == "10.35.4.9"
@@ -145,19 +145,19 @@ def test_login_kind_and_ip():
 def test_login_no_client_bcc():
     """BCC is computed by the daemon, not the client."""
     ctx, store = _capture()
-    with ctx, patch("iitgpu.mailer.Thread", _SyncThread):
+    with ctx, patch("slurmdeck.mailer.Thread", _SyncThread):
         mailer.send_login_notification("alice", "alice@iit.lk", "10.0.0.1")
     assert not store["bcc"]
 
 
 def test_login_local_fallback_ip():
     ctx, store = _capture()
-    with ctx, patch("iitgpu.mailer.Thread", _SyncThread):
+    with ctx, patch("slurmdeck.mailer.Thread", _SyncThread):
         mailer.send_login_notification("alice", "alice@iit.lk", "")
     assert store["ip"] == "local"
 
 
-# ── Regression: standalone SLURM MailProg (deploy/iit-gpu-mailer) fallback ────
+# ── Regression: standalone SLURM MailProg (deploy/slurm-deck-mailer) fallback ────
 # slurmctld runs this as the `slurm` user. Its msmtp fallback once passed `-s`,
 # which msmtp rejects ("invalid option -- 's'"), so when Resend was unreachable
 # no mail went out at all. The fallback must pipe a full RFC-822 message to
@@ -166,8 +166,8 @@ def test_login_local_fallback_ip():
 def _load_job_mailer():
     import importlib.util, pathlib
     from importlib.machinery import SourceFileLoader
-    p = pathlib.Path(__file__).resolve().parent.parent / "deploy" / "iit-gpu-mailer"
-    loader = SourceFileLoader("iit_gpu_jobmailer", str(p))
+    p = pathlib.Path(__file__).resolve().parent.parent / "deploy" / "slurm-deck-mailer"
+    loader = SourceFileLoader("slurm_deck_jobmailer", str(p))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
@@ -205,7 +205,7 @@ def test_daemon_mail_blocked_when_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(mailer, "_mail_flag_path", lambda: str(flag))
 
     called = {"n": 0}
-    monkeypatch.setattr("iitgpu.auditclient.daemon_request",
+    monkeypatch.setattr("slurmdeck.auditclient.daemon_request",
                         lambda *a, **k: called.__setitem__("n", called["n"] + 1) or {"ok": True})
     ok, msg = mailer._daemon_mail("a@b.com", "subj", "<p>hi</p>")
     assert ok is False
@@ -216,7 +216,7 @@ def test_daemon_mail_blocked_when_disabled(tmp_path, monkeypatch):
 def test_daemon_mail_allows_when_enabled(tmp_path, monkeypatch):
     flag = tmp_path / ".mail-disabled"   # absent → enabled
     monkeypatch.setattr(mailer, "_mail_flag_path", lambda: str(flag))
-    monkeypatch.setattr("iitgpu.auditclient.daemon_request",
+    monkeypatch.setattr("slurmdeck.auditclient.daemon_request",
                         lambda *a, **k: {"ok": True})
     ok, msg = mailer._daemon_mail("a@b.com", "subj", "<p>hi</p>")
     assert ok is True

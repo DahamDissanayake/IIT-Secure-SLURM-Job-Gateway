@@ -19,7 +19,7 @@ it is standard SLURM mail, relayed by a local MTA.
 
 1. Sign in at <https://resend.com>.
 2. **Domains → Add Domain** — verify your cluster's sending domain
-   (e.g. `iit-gpu.example.edu`).  Follow the DNS records instructions.
+   (e.g. `slurm-deck.example.edu`).  Follow the DNS records instructions.
 3. **API Keys → Create API Key** — scope: *Sending access* only.
    Copy the key (`re_...`); you will need it once below and never again.
 

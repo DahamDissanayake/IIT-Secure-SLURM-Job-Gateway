@@ -17,7 +17,7 @@ def _make_sacct_output(*rows):
 
 
 def test_sacct_history_parses_completed_jobs():
-    from iitgpu.slurm import sacct_history, QueueEntry
+    from slurmdeck.slurm import sacct_history, QueueEntry
 
     mock = MagicMock()
     mock.returncode = 0
@@ -35,7 +35,7 @@ def test_sacct_history_parses_completed_jobs():
 
 
 def test_sacct_history_skips_step_lines():
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
 
     mock = MagicMock()
     mock.returncode = 0
@@ -50,7 +50,7 @@ def test_sacct_history_skips_step_lines():
 
 
 def test_sacct_history_returns_empty_on_failure():
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
 
     mock = MagicMock()
     mock.returncode = 1
@@ -60,14 +60,14 @@ def test_sacct_history_returns_empty_on_failure():
 
 
 def test_sacct_history_returns_empty_on_oserror():
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
 
     with patch("subprocess.run", side_effect=OSError("no sacct")):
         assert sacct_history() == []
 
 
 def test_sacct_history_respects_limit():
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
 
     rows_data = [
         (str(i), f"job{i}", "daham", "COMPLETED", "00:01:00")
@@ -83,7 +83,7 @@ def test_sacct_history_respects_limit():
 
 def test_sacct_history_strips_state_suffix():
     """State 'CANCELLED by 1234' should be stripped to 'CANCELLED'."""
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
 
     mock = MagicMock()
     mock.returncode = 0
@@ -104,7 +104,7 @@ def test_job_history_uses_sacct_when_enabled(tmp_path, monkeypatch):
     mock.stdout = _make_sacct_output(("400", "sacct_job", "daham", "COMPLETED", "00:30:00"))
 
     with patch("subprocess.run", return_value=mock):
-        from iitgpu.slurm import job_history
+        from slurmdeck.slurm import job_history
         rows = job_history(str(tmp_path))
     assert any(r.job_id == "400" for r in rows)
 
@@ -120,7 +120,7 @@ def test_job_history_falls_back_to_file_scan_when_sacct_disabled(tmp_path, monke
     job_dir.mkdir(parents=True)
     (job_dir / "slurm-500.out").write_text("output\n")
 
-    from iitgpu.slurm import job_history
+    from slurmdeck.slurm import job_history
     rows = job_history(str(jobs_root))
     assert any(r.job_id == "500" for r in rows)
 
@@ -140,7 +140,7 @@ def test_job_history_falls_back_when_sacct_returns_empty(tmp_path, monkeypatch):
     (job_dir / "slurm-600.out").write_text("output\n")
 
     with patch("subprocess.run", return_value=mock):
-        from iitgpu.slurm import job_history
+        from slurmdeck.slurm import job_history
         rows = job_history(str(jobs_root))
     assert any(r.job_id == "600" for r in rows)
 
@@ -154,7 +154,7 @@ def test_job_history_falls_back_when_sacct_returns_empty(tmp_path, monkeypatch):
 # line for the real state, and don't blame routine Jupyter logging as a failure.
 
 def test_recent_jobs_uses_slurm_epilogue_state(tmp_path):
-    from iitgpu.slurm import recent_jobs
+    from slurmdeck.slurm import recent_jobs
     job_dir = tmp_path / "jobs" / "amasha" / "notebook_1"
     job_dir.mkdir(parents=True)
     (job_dir / "slurm-269.out").write_text("stdout\n")
@@ -168,10 +168,10 @@ def test_recent_jobs_uses_slurm_epilogue_state(tmp_path):
 
 
 def test_recent_jobs_does_not_fail_notebook_for_routine_stderr(tmp_path):
-    from iitgpu.slurm import recent_jobs
+    from slurmdeck.slurm import recent_jobs
     job_dir = tmp_path / "jobs" / "amasha" / "notebook_2"
     job_dir.mkdir(parents=True)
-    (job_dir / ".iit-jupyter").write_text("")
+    (job_dir / ".sd-jupyter").write_text("")
     (job_dir / "slurm-300.out").write_text("stdout\n")
     (job_dir / "slurm-300.err").write_text(
         "[I 2026-07-16 ServerApp] JupyterLab extension loaded from ...\n"
@@ -182,10 +182,10 @@ def test_recent_jobs_does_not_fail_notebook_for_routine_stderr(tmp_path):
 
 
 def test_recent_jobs_still_flags_traceback_as_failed(tmp_path):
-    from iitgpu.slurm import recent_jobs
+    from slurmdeck.slurm import recent_jobs
     job_dir = tmp_path / "jobs" / "daham" / "train_1"
     job_dir.mkdir(parents=True)
-    (job_dir / ".iit-jupyter").write_text("")  # even a jupyter job, a real crash still counts
+    (job_dir / ".sd-jupyter").write_text("")  # even a jupyter job, a real crash still counts
     (job_dir / "slurm-400.out").write_text("training...\n")
     (job_dir / "slurm-400.err").write_text(
         "Traceback (most recent call last):\n  File \"x.py\", line 1\nValueError: boom\n"
@@ -196,7 +196,7 @@ def test_recent_jobs_still_flags_traceback_as_failed(tmp_path):
 
 def test_recent_jobs_flags_failed_for_plain_script_stderr(tmp_path):
     """Non-notebook jobs keep the old behavior: any stderr content is FAILED."""
-    from iitgpu.slurm import recent_jobs
+    from slurmdeck.slurm import recent_jobs
     job_dir = tmp_path / "jobs" / "daham" / "train_2"
     job_dir.mkdir(parents=True)
     (job_dir / "slurm-401.out").write_text("training...\n")
@@ -206,7 +206,7 @@ def test_recent_jobs_flags_failed_for_plain_script_stderr(tmp_path):
 
 
 def test_recent_jobs_completed_when_err_empty():
-    from iitgpu.slurm import recent_jobs
+    from slurmdeck.slurm import recent_jobs
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         from pathlib import Path
@@ -223,7 +223,7 @@ def test_recent_jobs_completed_when_err_empty():
 def test_config_sacct_enabled_explicit_true(monkeypatch):
     monkeypatch.setenv("SACCT_ENABLED", "1")
     import importlib
-    import iitgpu.config as cfg_mod
+    import slurmdeck.config as cfg_mod
     importlib.reload(cfg_mod)
     cfg = cfg_mod.load_config()
     assert cfg.sacct_enabled is True
@@ -232,7 +232,7 @@ def test_config_sacct_enabled_explicit_true(monkeypatch):
 def test_config_sacct_enabled_explicit_false(monkeypatch):
     monkeypatch.setenv("SACCT_ENABLED", "0")
     import importlib
-    import iitgpu.config as cfg_mod
+    import slurmdeck.config as cfg_mod
     importlib.reload(cfg_mod)
     cfg = cfg_mod.load_config()
     assert cfg.sacct_enabled is False
@@ -242,7 +242,7 @@ def test_config_sacct_auto_detects_via_which(monkeypatch):
     monkeypatch.setenv("SACCT_ENABLED", "auto")
     with patch("shutil.which", return_value="/usr/bin/sacct"):
         import importlib
-        import iitgpu.config as cfg_mod
+        import slurmdeck.config as cfg_mod
         importlib.reload(cfg_mod)
         cfg = cfg_mod.load_config()
     assert cfg.sacct_enabled is True
@@ -252,7 +252,7 @@ def test_config_sacct_auto_returns_false_when_sacct_missing(monkeypatch):
     monkeypatch.setenv("SACCT_ENABLED", "auto")
     with patch("shutil.which", return_value=None):
         import importlib
-        import iitgpu.config as cfg_mod
+        import slurmdeck.config as cfg_mod
         importlib.reload(cfg_mod)
         cfg = cfg_mod.load_config()
     assert cfg.sacct_enabled is False
@@ -263,7 +263,7 @@ def test_config_sacct_auto_returns_false_when_sacct_missing(monkeypatch):
 def test_sacct_history_uses_start_window_not_state_filter():
     """sacct_history must pass -S (start window) and must NOT pass --state=,
     because sacct's --state filter silently drops already-completed jobs."""
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
     captured = {}
 
     def fake_run(cmd, *a, **k):
@@ -287,7 +287,7 @@ def test_sacct_history_uses_start_window_not_state_filter():
 
 def test_sacct_history_filters_running_and_pending_in_python():
     """Rows in RUNNING/PENDING must be excluded (they belong to queue())."""
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
     mock = MagicMock()
     mock.returncode = 0
     mock.stdout = (
@@ -305,7 +305,7 @@ def test_sacct_history_filters_running_and_pending_in_python():
 
 
 def test_sacct_history_accepts_days_param():
-    from iitgpu.slurm import sacct_history
+    from slurmdeck.slurm import sacct_history
     captured = {}
 
     def fake_run(cmd, *a, **k):
@@ -332,7 +332,7 @@ def test_extend_job_time_calls_scontrol_update(monkeypatch):
         r = MagicMock(); r.returncode = 0; r.stderr = ""
         return r
     with patch("subprocess.run", fake_run):
-        from iitgpu.slurm import extend_job_time
+        from slurmdeck.slurm import extend_job_time
         ok, msg = extend_job_time("42", extra_hours=2)
     assert ok
     assert any("scontrol" in str(c) for c in captured)
@@ -347,7 +347,7 @@ def test_extend_job_time_returns_false_on_failure(monkeypatch):
         r = MagicMock(); r.returncode = 1; r.stderr = "Access denied"
         return r
     with patch("subprocess.run", fake_run):
-        from iitgpu.slurm import extend_job_time
+        from slurmdeck.slurm import extend_job_time
         ok, msg = extend_job_time("99")
     assert not ok
     assert "Access denied" in msg
@@ -355,8 +355,8 @@ def test_extend_job_time_returns_false_on_failure(monkeypatch):
 
 def test_extend_job_time_demo_mode(monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "1")
-    import importlib, iitgpu.slurm as _sm; importlib.reload(_sm)
-    from iitgpu.slurm import extend_job_time
+    import importlib, slurmdeck.slurm as _sm; importlib.reload(_sm)
+    from slurmdeck.slurm import extend_job_time
     ok, msg = extend_job_time("7", 3)
     assert ok
     assert "demo" in msg

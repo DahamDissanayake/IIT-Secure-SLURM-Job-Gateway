@@ -15,12 +15,12 @@ import huggingface_hub.constants as hf_constants
 def _cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
     (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-    from iitgpu.config import load_config
+    from slurmdeck.config import load_config
     return load_config()
 
 
 def test_download_hf_disables_xet_and_limits_workers(tmp_path, monkeypatch):
-    from iitgpu import models
+    from slurmdeck import models
     cfg = _cfg(tmp_path, monkeypatch)
 
     monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
@@ -36,7 +36,7 @@ def test_download_hf_disables_xet_and_limits_workers(tmp_path, monkeypatch):
 
     try:
         with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot), \
-             patch("iitgpu.models.register_model"):
+             patch("slurmdeck.models.register_model"):
             ok, res = models.download_hf(cfg, "mistralai/Mistral-7B-v0.1")
     finally:
         hf_constants.HF_HUB_DISABLE_XET = saved_const
@@ -54,7 +54,7 @@ def test_download_hf_disables_xet_and_limits_workers(tmp_path, monkeypatch):
 
 
 def test_download_hf_audit_includes_path_and_size(tmp_path, monkeypatch):
-    from iitgpu import models
+    from slurmdeck import models
     cfg = _cfg(tmp_path, monkeypatch)
     logged = []
 
@@ -66,8 +66,8 @@ def test_download_hf_audit_includes_path_and_size(tmp_path, monkeypatch):
     saved = hf_constants.HF_HUB_DISABLE_XET
     try:
         with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot), \
-             patch("iitgpu.models.register_model"), \
-             patch("iitgpu.models.auditclient.log",
+             patch("slurmdeck.models.register_model"), \
+             patch("slurmdeck.models.auditclient.log",
                    side_effect=lambda *a, **kw: logged.append((a, kw))):
             models.download_hf(cfg, "org/repo")
     finally:
@@ -81,7 +81,7 @@ def test_download_hf_audit_includes_path_and_size(tmp_path, monkeypatch):
 
 
 def test_download_url_audit_includes_path_and_size(tmp_path, monkeypatch):
-    from iitgpu import models
+    from slurmdeck import models
     cfg = _cfg(tmp_path, monkeypatch)
     logged = []
 
@@ -90,8 +90,8 @@ def test_download_url_audit_includes_path_and_size(tmp_path, monkeypatch):
         Path(dest).write_bytes(b"x" * 1024)
 
     with patch("urllib.request.urlretrieve", side_effect=fake_retrieve), \
-         patch("iitgpu.models.register_model"), \
-         patch("iitgpu.models.auditclient.log",
+         patch("slurmdeck.models.register_model"), \
+         patch("slurmdeck.models.auditclient.log",
                side_effect=lambda *a, **kw: logged.append((a, kw))):
         models.download_url(cfg, "https://example.com/model.bin", "mymodel")
 

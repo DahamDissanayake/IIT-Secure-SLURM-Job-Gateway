@@ -8,8 +8,8 @@ overwrote the previous registry entry.
 """
 from unittest.mock import patch
 
-from iitgpu.config import load_config
-from iitgpu.envs import (
+from slurmdeck.config import load_config
+from slurmdeck.envs import (
     EnvEntry,
     _load_venv_registry,
     _save_venv_registry,
@@ -56,6 +56,6 @@ def test_list_all_envs_surfaces_registry_conda_when_discovery_misses_it(tmp_path
         EnvEntry(name="llm-finetune", kind="conda", path="/shared/envs/llm-finetune"),
     ])
     # another user's conda discovers nothing (env not in their environments.txt)
-    with patch("iitgpu.envs.discover_conda_envs", return_value=[]):
+    with patch("slurmdeck.envs.discover_conda_envs", return_value=[]):
         names = {e.name for e in list_all_envs(cfg)}
     assert "llm-finetune" in names

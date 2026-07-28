@@ -15,20 +15,20 @@ def test_in_jail_accepts_file_under_root(tmp_path, monkeypatch):
     target = tmp_path / "data" / "file.txt"
     target.parent.mkdir(parents=True)
     target.write_text("hi")
-    from iitgpu.validate import in_jail
+    from slurmdeck.validate import in_jail
     assert in_jail(str(target)) is True
 
 
 def test_in_jail_rejects_escape_dotdot(tmp_path, monkeypatch):
     _set_nfs(monkeypatch, str(tmp_path))
     escape = str(tmp_path) + "/../other"
-    from iitgpu.validate import in_jail
+    from slurmdeck.validate import in_jail
     assert in_jail(escape) is False
 
 
 def test_in_jail_rejects_etc_shadow(tmp_path, monkeypatch):
     _set_nfs(monkeypatch, str(tmp_path))
-    from iitgpu.validate import in_jail
+    from slurmdeck.validate import in_jail
     assert in_jail("/etc/shadow") is False
 
 
@@ -41,7 +41,7 @@ def test_in_jail_rejects_symlink_escape(tmp_path, monkeypatch):
         link.symlink_to(outside)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks not available on this platform")
-    from iitgpu.validate import in_jail
+    from slurmdeck.validate import in_jail
     assert in_jail(str(link)) is False
 
 
@@ -51,36 +51,36 @@ def test_safe_listdir_inside_jail(tmp_path, monkeypatch):
     _set_nfs(monkeypatch, str(tmp_path))
     (tmp_path / "a.txt").write_text("a")
     (tmp_path / "b.txt").write_text("b")
-    from iitgpu.validate import safe_listdir
+    from slurmdeck.validate import safe_listdir
     result = safe_listdir(str(tmp_path))
     assert set(result) == {"a.txt", "b.txt"}
 
 
 def test_safe_listdir_outside_jail_returns_empty(tmp_path, monkeypatch):
     _set_nfs(monkeypatch, str(tmp_path))
-    from iitgpu.validate import safe_listdir
+    from slurmdeck.validate import safe_listdir
     assert safe_listdir("/etc") == []
 
 
 # ── clamp_int ────────────────────────────────────────────────────────────────
 
 def test_clamp_int_within_range():
-    from iitgpu.validate import clamp_int
+    from slurmdeck.validate import clamp_int
     assert clamp_int(4, 1, 8, 1) == 4
 
 
 def test_clamp_int_caps_high():
-    from iitgpu.validate import clamp_int
+    from slurmdeck.validate import clamp_int
     assert clamp_int(9999, 1, 8, 1) == 8
 
 
 def test_clamp_int_floors_low():
-    from iitgpu.validate import clamp_int
+    from slurmdeck.validate import clamp_int
     assert clamp_int(0, 1, 8, 1) == 1
 
 
 def test_clamp_int_uses_default_on_bad_type():
-    from iitgpu.validate import clamp_int
+    from slurmdeck.validate import clamp_int
     assert clamp_int("bad", 1, 8, 3) == 3  # type: ignore
 
 
@@ -88,61 +88,61 @@ def test_clamp_int_uses_default_on_bad_type():
 
 def test_clean_time_limit_valid(monkeypatch):
     monkeypatch.setenv("MAX_HOURS", "72")
-    from iitgpu.validate import clean_time_limit
+    from slurmdeck.validate import clean_time_limit
     assert clean_time_limit("12:30:00") == "12:30:00"
 
 
 def test_clean_time_limit_clamps_over_max(monkeypatch):
     monkeypatch.setenv("MAX_HOURS", "72")
-    from iitgpu.validate import clean_time_limit
+    from slurmdeck.validate import clean_time_limit
     result = clean_time_limit("999:00:00")
     assert result == "72:00:00"
 
 
 def test_clean_time_limit_rejects_garbage():
-    from iitgpu.validate import clean_time_limit
+    from slurmdeck.validate import clean_time_limit
     assert clean_time_limit("not-a-time") is None
 
 
 def test_clean_time_limit_rejects_bad_minutes():
-    from iitgpu.validate import clean_time_limit
+    from slurmdeck.validate import clean_time_limit
     assert clean_time_limit("01:99:00") is None
 
 
 # ── clean_job_name ────────────────────────────────────────────────────────────
 
 def test_clean_job_name_strips_bad_chars():
-    from iitgpu.validate import clean_job_name
+    from slurmdeck.validate import clean_job_name
     assert clean_job_name("my job!@#") == "myjob"
 
 
 def test_clean_job_name_allows_safe_chars():
-    from iitgpu.validate import clean_job_name
+    from slurmdeck.validate import clean_job_name
     assert clean_job_name("train_v1.2-run") == "train_v1.2-run"
 
 
 def test_clean_job_name_truncates_at_64():
-    from iitgpu.validate import clean_job_name
+    from slurmdeck.validate import clean_job_name
     assert len(clean_job_name("a" * 100)) == 64
 
 
 # ── clean_run_command ─────────────────────────────────────────────────────────
 
 def test_clean_run_command_removes_newlines():
-    from iitgpu.validate import clean_run_command
+    from slurmdeck.validate import clean_run_command
     result = clean_run_command("python train.py\nrm -rf /")
     assert "\n" not in result
 
 
 def test_clean_run_command_removes_control_chars():
-    from iitgpu.validate import clean_run_command
+    from slurmdeck.validate import clean_run_command
     result = clean_run_command("python\x00train.py\x1b[31m")
     assert "\x00" not in result
     assert "\x1b" not in result
 
 
 def test_clean_run_command_truncates_at_1000():
-    from iitgpu.validate import clean_run_command
+    from slurmdeck.validate import clean_run_command
     assert len(clean_run_command("x" * 2000)) == 1000
 
 
@@ -158,10 +158,10 @@ def _user_dir(tmp_path, user="alice"):
 def _v(text, tmp_path, username="alice", email="alice@iit.lk"):
     """Run validate_sbatch with NFS_ROOT set and email_for mocked."""
     from unittest.mock import patch
-    import importlib, iitgpu.validate as v
+    import importlib, slurmdeck.validate as v
     os.environ["NFS_ROOT"] = str(tmp_path)
     importlib.reload(v)
-    with patch("iitgpu.daemonclient.email_for", return_value=email):
+    with patch("slurmdeck.daemonclient.email_for", return_value=email):
         return v.validate_sbatch(text, username)
 
 
@@ -261,11 +261,11 @@ def test_validate_sbatch_rejects_gid_directive(tmp_path):
 def test_validate_sbatch_mail_user_fail_closed_when_daemon_down(tmp_path):
     """L1: if the daemon can't confirm the address, a non-empty --mail-user is rejected."""
     from unittest.mock import patch
-    import importlib, iitgpu.validate as v
+    import importlib, slurmdeck.validate as v
     os.environ["NFS_ROOT"] = str(tmp_path)
     _user_dir(tmp_path)
     importlib.reload(v)
-    with patch("iitgpu.daemonclient.email_for", side_effect=Exception("daemon down")):
+    with patch("slurmdeck.daemonclient.email_for", side_effect=Exception("daemon down")):
         errors = v.validate_sbatch("#SBATCH --mail-user=attacker@evil.com\n", "alice")
     assert any("mail-user" in e for e in errors)
 
@@ -287,9 +287,9 @@ def test_validate_sbatch_mail_user_foreign_rejected(tmp_path):
 def test_validate_sbatch_rejects_excess_gpus(tmp_path):
     os.environ.update({"NFS_ROOT": str(tmp_path), "MAX_GPUS": "2"})
     _user_dir(tmp_path)
-    import importlib, iitgpu.validate as v; importlib.reload(v)
+    import importlib, slurmdeck.validate as v; importlib.reload(v)
     from unittest.mock import patch
-    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"):
+    with patch("slurmdeck.daemonclient.email_for", return_value="alice@iit.lk"):
         errors = v.validate_sbatch("#SBATCH --gres=gpu:8\n", "alice")
     assert any("GPU" in e for e in errors)
     os.environ.pop("MAX_GPUS", None)
@@ -298,9 +298,9 @@ def test_validate_sbatch_rejects_excess_gpus(tmp_path):
 def test_validate_sbatch_rejects_excess_cpus(tmp_path):
     os.environ.update({"NFS_ROOT": str(tmp_path), "MAX_CPUS": "4"})
     _user_dir(tmp_path)
-    import importlib, iitgpu.validate as v; importlib.reload(v)
+    import importlib, slurmdeck.validate as v; importlib.reload(v)
     from unittest.mock import patch
-    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"):
+    with patch("slurmdeck.daemonclient.email_for", return_value="alice@iit.lk"):
         errors = v.validate_sbatch("#SBATCH --cpus-per-task=32\n", "alice")
     assert any("cpus" in e.lower() for e in errors)
     os.environ.pop("MAX_CPUS", None)
@@ -321,7 +321,7 @@ def test_validate_sbatch_ignores_indented_sbatch(tmp_path):
 
 def test_browse_roots_include_shared_datasets():
     """File manager and notebook must expose the same boundary."""
-    from iitgpu.validate import user_browse_roots
+    from slurmdeck.validate import user_browse_roots
     roots = user_browse_roots("/shared", "yenuli")
     assert "/shared/users/yenuli" in roots
     for shared in ("/shared/models", "/shared/envs", "/shared/data", "/shared/datasets"):
@@ -329,7 +329,7 @@ def test_browse_roots_include_shared_datasets():
 
 
 def test_browse_roots_exclude_other_users_and_jobs():
-    from iitgpu.validate import user_browse_roots
+    from slurmdeck.validate import user_browse_roots
     roots = user_browse_roots("/shared", "yenuli")
     assert "/shared/users" not in roots
     assert "/shared/jobs" not in roots
@@ -340,14 +340,14 @@ def test_validate_sbatch_rejects_excess_shards_against_live_pod_count(tmp_path):
     var -- on today's 4-pod cluster, requesting 5 must be rejected."""
     os.environ.update({"NFS_ROOT": str(tmp_path)})
     _user_dir(tmp_path)
-    import importlib, iitgpu.validate as v; importlib.reload(v)
+    import importlib, slurmdeck.validate as v; importlib.reload(v)
     from unittest.mock import patch
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                       mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=4, shard_alloc=0)
-    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
-         patch("iitgpu.slurm.get_node_stats", return_value=stats):
+    with patch("slurmdeck.daemonclient.email_for", return_value="alice@iit.lk"), \
+         patch("slurmdeck.slurm.get_node_stats", return_value=stats):
         errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
     assert any("pod" in e.lower() or "GPU" in e for e in errors)
 
@@ -357,14 +357,14 @@ def test_validate_sbatch_ceiling_tracks_a_resized_pod_count(tmp_path):
     proves the check isn't still pinned to the old fixed default of 4."""
     os.environ.update({"NFS_ROOT": str(tmp_path)})
     _user_dir(tmp_path)
-    import importlib, iitgpu.validate as v; importlib.reload(v)
+    import importlib, slurmdeck.validate as v; importlib.reload(v)
     from unittest.mock import patch
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=64, cpu_alloc=0,
                       mem_total_mb=124000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=8, shard_alloc=0)
-    with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
-         patch("iitgpu.slurm.get_node_stats", return_value=stats):
+    with patch("slurmdeck.daemonclient.email_for", return_value="alice@iit.lk"), \
+         patch("slurmdeck.slurm.get_node_stats", return_value=stats):
         errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
     assert errors == []
 
@@ -377,15 +377,15 @@ def test_shard_ceiling_falls_back_to_the_env_var_when_shards_report_zero(tmp_pat
     back to MAX_GPU_SHARDS, the same as an unreachable scontrol."""
     os.environ.update({"NFS_ROOT": str(tmp_path), "MAX_GPU_SHARDS": "4"})
     _user_dir(tmp_path)
-    import importlib, iitgpu.validate as v; importlib.reload(v)
+    import importlib, slurmdeck.validate as v; importlib.reload(v)
     from unittest.mock import patch
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     zero = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                      shard_total=0, shard_alloc=0)
     try:
-        with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
-             patch("iitgpu.slurm.get_node_stats", return_value=zero):
+        with patch("slurmdeck.daemonclient.email_for", return_value="alice@iit.lk"), \
+             patch("slurmdeck.slurm.get_node_stats", return_value=zero):
             assert v._max_gpu_shards() == 4
             assert v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice") == []
             over = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")

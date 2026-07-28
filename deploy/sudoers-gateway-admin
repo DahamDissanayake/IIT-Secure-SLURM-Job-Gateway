@@ -3,8 +3,8 @@ Defaults:%gpuadmins !lecture, !use_pty, timestamp_timeout=0
 %gpuadmins ALL=(root) NOPASSWD: \
     /usr/bin/scontrol update *, \
     /usr/bin/scontrol reconfigure, \
-    /usr/local/bin/iit-gpu-adduser, \
-    /usr/local/bin/iit-gpu-deluser, \
+    /usr/local/bin/slurm-deck-adduser, \
+    /usr/local/bin/slurm-deck-deluser, \
     /usr/sbin/chpasswd, \
     /usr/bin/sacctmgr, \
     /usr/bin/scancel
@@ -13,10 +13,10 @@ Defaults:%gpuadmins !lecture, !use_pty, timestamp_timeout=0
 # member to inspect that account as the user sees it. Constrained to exactly the
 # TUI launcher run as a gpuusers member — not a general shell. Actions inside are
 # audited as the target user (SO_PEERCRED); the switch itself is logged by the panel.
-%gpuadmins ALL=(%gpuusers) NOPASSWD: /usr/local/bin/iit-gpu-manager
+%gpuadmins ALL=(%gpuusers) NOPASSWD: /usr/local/bin/slurm-deck
 
 # GPU pod-count resize (admin panel): admins may run the cross-node resize
 # script as slurmadmin, the account that owns gres.conf/slurm.conf and the
 # slurmctld/slurmd restart path. The script itself enforces an empty queue,
 # a lockfile, and backup/rollback -- this line only grants the run.
-%gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/iit-gpu/deploy/resize-pods.sh *
+%gpuadmins ALL=(slurmadmin) NOPASSWD: /opt/slurm-deck/deploy/resize-pods.sh *

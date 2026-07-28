@@ -2,7 +2,7 @@
 """Main Menu wiring: item numbering and the Notify When Free gate."""
 import inspect
 
-import iitgpu.menu as m
+import slurmdeck.menu as m
 
 
 def test_notify_when_free_is_a_main_menu_item():

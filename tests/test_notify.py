@@ -2,9 +2,9 @@
 """Phase 8: notifications (mail directive + poller) and quota surfacing."""
 from unittest.mock import patch
 import pytest
-from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
-from iitgpu import notify
-from iitgpu.slurm import QueueEntry
+from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
+from slurmdeck import notify
+from slurmdeck.slurm import QueueEntry
 
 
 def _spec(**kw):
@@ -48,8 +48,8 @@ def test_mta_present_detection():
 
 def test_poll_until_done_returns_terminal_state():
     rows = [QueueEntry("55", "j", "COMPLETED", "gpu", "0:30", 1)]
-    with patch("iitgpu.notify.slurm.sacct_history", return_value=rows), \
-         patch("iitgpu.notify.slurm.queue", return_value=[]):
+    with patch("slurmdeck.notify.slurm.sacct_history", return_value=rows), \
+         patch("slurmdeck.notify.slurm.queue", return_value=[]):
         state = notify.poll_until_done("55", interval=0)
     assert state == "COMPLETED"
 
@@ -63,8 +63,8 @@ def test_poll_until_done_waits_then_completes():
     def fake_hist(*a, **k):
         i = min(calls["n"], len(seq) - 1); calls["n"] += 1
         return seq[i]
-    with patch("iitgpu.notify.slurm.sacct_history", side_effect=fake_hist), \
-         patch("iitgpu.notify.slurm.queue", return_value=[]), \
+    with patch("slurmdeck.notify.slurm.sacct_history", side_effect=fake_hist), \
+         patch("slurmdeck.notify.slurm.queue", return_value=[]), \
          patch("time.sleep", return_value=None):
         state = notify.poll_until_done("55", interval=0)
     assert state == "FAILED"

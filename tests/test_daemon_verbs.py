@@ -210,13 +210,13 @@ def test_schema_migration_adds_must_change_pw_column():
 # ── timezone conversion ───────────────────────────────────────────────────────
 
 def test_admin_fmt_ts_utc_to_lk():
-    from iitgpu.admin import _fmt_ts
+    from slurmdeck.admin import _fmt_ts
     result = _fmt_ts("2026-06-03T00:00:00+00:00")
     assert result == "2026-06-03 05:30:00"
 
 
 def test_admin_fmt_ts_handles_z_suffix():
-    from iitgpu.admin import _fmt_ts
+    from slurmdeck.admin import _fmt_ts
     assert _fmt_ts("2026-06-03T00:00:00Z") == "2026-06-03 05:30:00"
 
 
@@ -226,17 +226,17 @@ def test_job_folder_uses_lk_time(tmp_path, monkeypatch):
     lk = timezone(timedelta(hours=5, minutes=30))
     fixed_lk = datetime(2026, 6, 3, 12, 0, 0, tzinfo=lk)
 
-    import iitgpu.jobs as jobs_mod
+    import slurmdeck.jobs as jobs_mod
     monkeypatch.setattr(
         jobs_mod, "_LK", lk,
         raising=False,
     )
 
     from unittest.mock import patch
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
     spec = JobSpec(job_name="test", partition="gpu", gpu_shards=1, cpus=4,
                    mem_gb=8, time_limit="01:00:00", run_command="python x.py")
-    with patch("iitgpu.jobs.datetime") as mock_dt:
+    with patch("slurmdeck.jobs.datetime") as mock_dt:
         mock_dt.now.return_value = fixed_lk
         folder = make_job_folder(str(tmp_path), spec)
     # Folder name should contain LK timestamp

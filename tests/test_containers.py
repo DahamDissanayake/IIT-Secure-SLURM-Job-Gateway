@@ -1,5 +1,5 @@
 # tests/test_containers.py
-"""Tests for iitgpu/containers.py and container branch of render_sbatch."""
+"""Tests for slurmdeck/containers.py and container branch of render_sbatch."""
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +10,7 @@ import pytest
 
 def test_list_images_empty_when_dir_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-    from iitgpu.containers import list_images
+    from slurmdeck.containers import list_images
     result = list_images(str(tmp_path))
     assert result == []
 
@@ -23,7 +23,7 @@ def test_list_images_returns_sif_files(tmp_path, monkeypatch):
     (images_dir / "vision.sif").write_text("")
     (images_dir / "README.txt").write_text("")  # should be excluded
 
-    from iitgpu.containers import list_images
+    from slurmdeck.containers import list_images
     result = list_images(str(tmp_path))
     assert len(result) == 2
     assert all(r.endswith(".sif") for r in result)
@@ -35,31 +35,31 @@ def test_list_images_sorted(tmp_path):
     images_dir.mkdir()
     for name in ["z-model.sif", "a-model.sif", "m-model.sif"]:
         (images_dir / name).write_text("")
-    from iitgpu.containers import list_images
+    from slurmdeck.containers import list_images
     result = list_images(str(tmp_path))
     assert result == sorted(result)
 
 
 def test_validate_image_rejects_outside_jail(tmp_path):
-    from iitgpu.containers import validate_image
-    with patch("iitgpu.containers.in_jail", return_value=False):
+    from slurmdeck.containers import validate_image
+    with patch("slurmdeck.containers.in_jail", return_value=False):
         assert validate_image("/etc/passwd.sif") is False
 
 
 def test_validate_image_rejects_non_sif():
-    from iitgpu.containers import validate_image
-    with patch("iitgpu.containers.in_jail", return_value=True):
+    from slurmdeck.containers import validate_image
+    with patch("slurmdeck.containers.in_jail", return_value=True):
         assert validate_image("/shared/images/model.tar.gz") is False
 
 
 def test_validate_image_accepts_valid_sif():
-    from iitgpu.containers import validate_image
-    with patch("iitgpu.containers.in_jail", return_value=True):
+    from slurmdeck.containers import validate_image
+    with patch("slurmdeck.containers.in_jail", return_value=True):
         assert validate_image("/shared/images/llm-finetune.sif") is True
 
 
 def test_render_apptainer_wrap_contains_nv_flag():
-    from iitgpu.containers import render_apptainer_wrap
+    from slurmdeck.containers import render_apptainer_wrap
     result = render_apptainer_wrap("/shared/images/vision.sif", "python train.py")
     assert "--nv" in result
     assert "--bind /shared" in result
@@ -69,7 +69,7 @@ def test_render_apptainer_wrap_contains_nv_flag():
 # ── render_sbatch container branch ────────────────────────────────────────────
 
 def test_render_sbatch_container_uses_apptainer(tmp_path):
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(
         job_name="test_cont",
@@ -89,7 +89,7 @@ def test_render_sbatch_container_uses_apptainer(tmp_path):
 
 
 def test_render_sbatch_container_omits_conda_activation(tmp_path):
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(
         job_name="test_cont",
@@ -110,7 +110,7 @@ def test_render_sbatch_container_omits_conda_activation(tmp_path):
 
 def test_render_sbatch_no_container_still_works(tmp_path):
     """Ensure the non-container path is unaffected."""
-    from iitgpu.jobs import JobSpec, make_job_folder, render_sbatch
+    from slurmdeck.jobs import JobSpec, make_job_folder, render_sbatch
 
     spec = JobSpec(
         job_name="plain_job",
@@ -129,7 +129,7 @@ def test_render_sbatch_no_container_still_works(tmp_path):
 
 
 def test_jobspec_container_image_default_is_empty():
-    from iitgpu.jobs import JobSpec
+    from slurmdeck.jobs import JobSpec
     spec = JobSpec(
         job_name="j", partition="gpu", gpu_shards=1, cpus=1, mem_gb=4,
         time_limit="", run_command="echo hi",

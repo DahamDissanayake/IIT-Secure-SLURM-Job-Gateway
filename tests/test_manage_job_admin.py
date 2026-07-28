@@ -6,8 +6,8 @@ admin could not even SEE another user's job here, let alone cancel it."""
 from unittest.mock import MagicMock
 import pytest
 
-from iitgpu import monitor
-from iitgpu.slurm import QueueEntry
+from slurmdeck import monitor
+from slurmdeck.slurm import QueueEntry
 
 
 def _entries():

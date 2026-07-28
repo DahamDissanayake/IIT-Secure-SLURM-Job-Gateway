@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from iitgpu.launchspec import (
+from slurmdeck.launchspec import (
     LaunchSpec, apply_pods, availability_line, default_spec,
     from_rerun, from_template, pod_availability, pod_label,
     recent_scripts, to_job_spec,
 )
-from iitgpu.slurm import NodeStats
+from slurmdeck.slurm import NodeStats
 
 NODE_CPUS = 32
 NODE_MEM_GB = 60

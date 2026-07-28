@@ -2,7 +2,7 @@
 """Phase 3: hold/release/requeue, job detail+seff, history filters."""
 from unittest.mock import MagicMock, patch
 import pytest
-from iitgpu import slurm
+from slurmdeck import slurm
 
 
 def _run_ok(stdout="", rc=0):

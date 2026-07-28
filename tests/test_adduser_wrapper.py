@@ -17,23 +17,23 @@ def test_wrapper_passes_bash_syntax():
     assert r.returncode == 0, r.stderr
 
 
-def test_wrapper_delegates_to_iit_gpu_adduser():
+def test_wrapper_delegates_to_slurm_deck_adduser():
     text = WRAPPER.read_text()
-    assert "iit-gpu-adduser" in text, "wrapper must call the real provisioning script"
+    assert "slurm-deck-adduser" in text, "wrapper must call the real provisioning script"
 
 
 def test_wrapper_rejects_invalid_username_then_cancels_on_eof():
     # Feed one invalid username; EOF should cancel without spinning forever.
     r = subprocess.run(["bash", str(WRAPPER)], input="BAD NAME\n",
                        capture_output=True, text=True, timeout=10,
-                       env={"PATH": "/usr/bin:/bin", "IIT_SITE_ENV": "/dev/null"})
+                       env={"PATH": "/usr/bin:/bin", "SD_SITE_ENV": "/dev/null"})
     out = r.stdout + r.stderr
     assert "Invalid" in out
     assert "cancelled" in out.lower()
     assert r.returncode != 0
 
 
-ADDUSER = REPO / "deploy" / "iit-gpu-adduser.sh"
+ADDUSER = REPO / "deploy" / "slurm-deck-adduser.sh"
 
 
 def test_adduser_script_passes_bash_syntax():
@@ -107,7 +107,7 @@ def test_adduser_creates_user_area_owner_and_admin_only():
     0700 locks admins out; anything looser exposes the area to other users.
     """
     from pathlib import Path
-    script = Path(__file__).resolve().parents[1] / "deploy" / "iit-gpu-adduser.sh"
+    script = Path(__file__).resolve().parents[1] / "deploy" / "slurm-deck-adduser.sh"
     text = script.read_text()
     assert "chmod 2770" in text, "user area must be mode 2770"
     assert "chmod 0700" not in text, "0700 would lock admins out of user areas"

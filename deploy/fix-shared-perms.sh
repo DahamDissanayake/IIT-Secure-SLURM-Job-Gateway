@@ -42,7 +42,7 @@ echo "== per-user areas -> 2770 owner:$ADMIN_GROUP + $ADMIN_GROUP ACL"
 # broken on this share; that was a measurement artifact of this host's
 # `mkdir` binary -- uutils coreutils 0.8.0 -- mishandling ACL-bearing parent
 # directories. Checked against the raw syscall, `python3 -c "import os;
-# os.mkdir(...)"`, setgid inherits fine. See iitgpu/jobs.py make_job_folder
+# os.mkdir(...)"`, setgid inherits fine. See slurmdeck/jobs.py make_job_folder
 # for the live comparison. On this host, verify mode-bit behaviour with a
 # raw syscall, not a coreutils binary.) So `chown ... :$ADMIN_GROUP` +
 # `chmod 2770` does grant $ADMIN_GROUP real access via ordinary POSIX group

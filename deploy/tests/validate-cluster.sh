@@ -7,7 +7,7 @@ wn(){ echo "  WARN | $*"; WARN=$((WARN+1)); }
 sec(){ echo; echo "== $* =="; }
 
 sec "L1 — Services (login)"
-for s in slurmctld slurmdbd mariadb munge iit-gpu-audit; do
+for s in slurmctld slurmdbd mariadb munge slurm-deck-audit; do
   [ "$(systemctl is-active $s)" = active ] && ok "$s active" || no "$s NOT active"
 done
 
@@ -41,7 +41,7 @@ sudo sacctmgr -n -P show qos long format=Name 2>/dev/null | grep -q long && ok "
 sudo -u daham sacct -X -n --format=JobID 2>/dev/null >/dev/null && ok "sacct runs as daham (sudoers ok)" || no "sacct-as-daham failed"
 
 sec "L6 — Security: sudoers scope"
-SUDO=/etc/sudoers.d/iit-gpu-gateway
+SUDO=/etc/sudoers.d/slurm-deck-gateway
 sudo grep -q 'sacct' $SUDO && ok "sacct in gateway sudoers" || no "sacct missing from sudoers"
 sudo grep -qE 'NOPASSWD: /usr/bin/sbatch' $SUDO && ok "sbatch allowed via sudoers" || no "sbatch missing"
 # Ensure NO blanket ALL command grant
@@ -50,26 +50,26 @@ sudo visudo -c -f $SUDO >/dev/null 2>&1 && ok "sudoers syntax valid" || no "sudo
 
 sec "L7 — Forced TUI / sshd"
 SSHCONF=$(sudo sshd -T 2>/dev/null | grep -i 'forcecommand' || true)
-sudo grep -rq 'ForceCommand /usr/local/bin/iit-gpu-gateway' /etc/ssh/ 2>/dev/null && ok "ForceCommand gateway wrapper configured for gpuusers" || wn "ForceCommand not found in /etc/ssh"
+sudo grep -rq 'ForceCommand /usr/local/bin/slurm-deck-gateway' /etc/ssh/ 2>/dev/null && ok "ForceCommand gateway wrapper configured for gpuusers" || wn "ForceCommand not found in /etc/ssh"
 
 sec "L8 — Tool: deployed code + unit suite"
-[ -f /opt/iit-gpu/iitgpu/slurm.py ] && ok "/opt/iit-gpu deployed" || no "/opt/iit-gpu missing"
-grep -q 'def sacct_history' /opt/iit-gpu/iitgpu/slurm.py && ok "deployed slurm.py has sacct_history" || no "sacct_history not deployed"
-grep -q 'def render_notebook_sbatch' /opt/iit-gpu/iitgpu/jobs.py && ok "deployed jobs.py has notebook render" || no "notebook render not deployed"
-( cd /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway && PYTHONPATH=. python3 -m pytest tests/ -q >/tmp/pyt.txt 2>&1 ) && ok "pytest suite: $(grep -oE '[0-9]+ passed' /tmp/pyt.txt)" || no "pytest FAILED ($(tail -1 /tmp/pyt.txt))"
+[ -f /opt/slurm-deck/slurmdeck/slurm.py ] && ok "/opt/slurm-deck deployed" || no "/opt/slurm-deck missing"
+grep -q 'def sacct_history' /opt/slurm-deck/slurmdeck/slurm.py && ok "deployed slurm.py has sacct_history" || no "sacct_history not deployed"
+grep -q 'def render_notebook_sbatch' /opt/slurm-deck/slurmdeck/jobs.py && ok "deployed jobs.py has notebook render" || no "notebook render not deployed"
+( cd /home/slurmadmin/slurm-deck && PYTHONPATH=. python3 -m pytest tests/ -q >/tmp/pyt.txt 2>&1 ) && ok "pytest suite: $(grep -oE '[0-9]+ passed' /tmp/pyt.txt)" || no "pytest FAILED ($(tail -1 /tmp/pyt.txt))"
 
 sec "L9 — Tool: live selftest as public (sandbox env)"
 sudo -u public env -i HOME=/home/public USER=public LOGNAME=public \
-  PATH="/shared/miniforge3/bin:/usr/local/bin:/usr/bin:/bin" PYTHONPATH="/opt/iit-gpu" \
+  PATH="/shared/miniforge3/bin:/usr/local/bin:/usr/bin:/bin" PYTHONPATH="/opt/slurm-deck" \
   CONDA_PREFIX_SHARED="/shared/miniforge3" NFS_ROOT="/shared" DEMO_MODE=1 \
-  /usr/bin/python3 -m iitgpu --selftest 2>&1 | grep -q 'All checks passed' && ok "public selftest passes" || no "public selftest failed"
+  /usr/bin/python3 -m slurmdeck --selftest 2>&1 | grep -q 'All checks passed' && ok "public selftest passes" || no "public selftest failed"
 
 sec "L10 — Tool functions (live, real SLURM)"
-PYTHONPATH=/opt/iit-gpu python3 - << 'PY' 2>&1
+PYTHONPATH=/opt/slurm-deck python3 - << 'PY' 2>&1
 import sys
 try:
-    from iitgpu.config import load_config
-    from iitgpu import slurm
+    from slurmdeck.config import load_config
+    from slurmdeck import slurm
     cfg = load_config()
     print(f"  PASS | config.sacct_enabled auto-detected = {cfg.sacct_enabled}")
     parts = slurm.get_partitions()
@@ -86,8 +86,8 @@ except Exception as e:
 PY
 
 sec "L11 — render_sbatch branches (conda/container/notebook)"
-PYTHONPATH=/opt/iit-gpu python3 - << 'PY' 2>&1
-from iitgpu.jobs import JobSpec, render_sbatch, render_notebook_sbatch
+PYTHONPATH=/opt/slurm-deck python3 - << 'PY' 2>&1
+from slurmdeck.jobs import JobSpec, render_sbatch, render_notebook_sbatch
 import tempfile, os
 d = tempfile.mkdtemp()
 # conda
@@ -102,8 +102,8 @@ sc3 = render_notebook_sbatch(s3,d,port=8888); print("  PASS | notebook render ha
 PY
 
 sec "L12 — Security: path jail"
-PYTHONPATH=/opt/iit-gpu NFS_ROOT=/shared python3 - << 'PY' 2>&1
-from iitgpu.validate import in_jail
+PYTHONPATH=/opt/slurm-deck NFS_ROOT=/shared python3 - << 'PY' 2>&1
+from slurmdeck.validate import in_jail
 checks = [("/shared/daham/x.py",True),("/etc/shadow",False),("/shared/../etc/passwd",False),("/shared/jobs/a",True)]
 allok=True
 for p,exp in checks:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# addUser.sh — interactive wrapper around iit-gpu-adduser.sh.
+# addUser.sh — interactive wrapper around slurm-deck-adduser.sh.
 # Prompts for a username (and a couple of options), then provisions the user on
 # BOTH nodes via the real onboarding script. Run as an admin (needs sudo).
 #
@@ -9,10 +9,10 @@ set -euo pipefail
 # Locate the real provisioning script: prefer the installed one, then the repo copy.
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADDUSER=""
-for cand in /usr/local/bin/iit-gpu-adduser "$SELF_DIR/deploy/iit-gpu-adduser.sh"; do
+for cand in /usr/local/bin/slurm-deck-adduser "$SELF_DIR/deploy/slurm-deck-adduser.sh"; do
     [ -x "$cand" ] && ADDUSER="$cand" && break
 done
-[ -n "$ADDUSER" ] || { echo "  ✘  iit-gpu-adduser.sh not found (looked in /usr/local/bin and $SELF_DIR/deploy)"; exit 1; }
+[ -n "$ADDUSER" ] || { echo "  ✘  slurm-deck-adduser.sh not found (looked in /usr/local/bin and $SELF_DIR/deploy)"; exit 1; }
 
 echo "════════════════════════════════════════════════"
 echo "   IIT GPU Cluster — Add a User"

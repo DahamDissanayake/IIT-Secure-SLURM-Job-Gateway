@@ -37,7 +37,7 @@ SQL
 sudo apt-get install -y slurmdbd
 
 # Copy the template (update DbPass to match step 2)
-sudo cp /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/slurmdbd.conf /etc/slurm/slurmdbd.conf
+sudo cp /home/slurmadmin/slurm-deck/deploy/slurmdbd.conf /etc/slurm/slurmdbd.conf
 sudo chown slurm:slurm /etc/slurm/slurmdbd.conf
 sudo chmod 0600 /etc/slurm/slurmdbd.conf
 
@@ -122,7 +122,7 @@ sacct --user=daham --format=JobID,JobName,State,Elapsed -X | head -10
 If slurmdbd causes issues, set `SACCT_ENABLED=0` in the launcher:
 
 ```bash
-# [LOGIN] — edit /usr/local/bin/iit-gpu-manager
+# [LOGIN] — edit /usr/local/bin/slurm-deck
 # Change: SACCT_ENABLED=auto  →  SACCT_ENABLED=0
 # This forces file-scan fallback without changing any other config.
 ```

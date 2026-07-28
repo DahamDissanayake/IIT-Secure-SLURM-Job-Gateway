@@ -3,7 +3,7 @@
 from unittest.mock import patch, MagicMock, call
 import json
 import pytest
-from iitgpu import admin
+from slurmdeck import admin
 
 
 def _proc(rc=0, out="", err=""):
@@ -14,7 +14,7 @@ def _proc(rc=0, out="", err=""):
 # ── Gate ──────────────────────────────────────────────────────────────────────
 
 def test_admin_menu_blocked_for_non_admin(capsys):
-    with patch("iitgpu.admin.is_admin", return_value=False):
+    with patch("slurmdeck.admin.is_admin", return_value=False):
         admin.admin_menu()
 
 
@@ -134,19 +134,19 @@ def test_resize_pod_count_refuses_when_jobs_running():
 
 
 def test_resize_pod_count_refuses_degenerate_n(monkeypatch):
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                       mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=4, shard_alloc=0)
     with patch("subprocess.run", return_value=_proc(out="")), \
-         patch("iitgpu.admin.get_node_stats", return_value=stats):
+         patch("slurmdeck.admin.get_node_stats", return_value=stats):
         ok, msg = admin.resize_pod_count(40)
     assert not ok
     assert "0 CPU" in msg
 
 
 def test_resize_pod_count_runs_the_script_when_clear(monkeypatch):
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     stats = NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                       mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                       shard_total=4, shard_alloc=0)
@@ -161,8 +161,8 @@ def test_resize_pod_count_runs_the_script_when_clear(monkeypatch):
         assert "resize-pods.sh" in cmd[-2]
         return 0, "resize applied: pod count is now 5", ""
 
-    with patch("iitgpu.admin._run", side_effect=fake_run), \
-         patch("iitgpu.admin.get_node_stats", return_value=stats):
+    with patch("slurmdeck.admin._run", side_effect=fake_run), \
+         patch("slurmdeck.admin.get_node_stats", return_value=stats):
         ok, msg = admin.resize_pod_count(5)
     assert ok
     assert "5" in msg
@@ -178,7 +178,7 @@ def test_resize_sudo_runas_matches_the_sudoers_grant():
     resize-pods.sh must be the same account admin.py passes to `sudo -u`."""
     import re
     from pathlib import Path
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     sudoers = (Path(__file__).resolve().parents[1]
                / "deploy" / "sudoers-gateway-admin").read_text()
     grant = [ln for ln in sudoers.splitlines() if "resize-pods.sh" in ln]
@@ -199,8 +199,8 @@ def test_resize_sudo_runas_matches_the_sudoers_grant():
         seen.append(cmd)
         return 0, "ok", ""
 
-    with patch("iitgpu.admin._run", side_effect=fake_run), \
-         patch("iitgpu.admin.get_node_stats", return_value=stats):
+    with patch("slurmdeck.admin._run", side_effect=fake_run), \
+         patch("slurmdeck.admin.get_node_stats", return_value=stats):
         admin.resize_pod_count(5)
 
     assert seen[0] == ["sudo", "-n", "-u", runas, script_path, "5"]
@@ -219,7 +219,7 @@ def test_resize_pod_count_refuses_when_stats_unreadable():
     """No live node stats means no way to check the candidate N would leave a
     usable per-pod size -- refuse rather than resize blind."""
     with patch("subprocess.run", return_value=_proc(out="")), \
-         patch("iitgpu.admin.get_node_stats", return_value=None):
+         patch("slurmdeck.admin.get_node_stats", return_value=None):
         ok, msg = admin.resize_pod_count(5)
     assert not ok
     assert "blind" in msg.lower() or "stats" in msg.lower()
@@ -228,7 +228,7 @@ def test_resize_pod_count_refuses_when_stats_unreadable():
 # ── Pods screen (_pods_menu) ────────────────────────────────────────────────
 
 def _stats(shard_total=4):
-    from iitgpu.slurm import NodeStats
+    from slurmdeck.slurm import NodeStats
     return NodeStats(state="MIXED", cpu_load=0.0, cpu_total=32, cpu_alloc=0,
                      mem_total_mb=62000, mem_alloc_mb=0, gpu_total=1, gpu_alloc=0,
                      shard_total=shard_total, shard_alloc=0)
@@ -243,8 +243,8 @@ def test_pods_menu_reports_unknown_when_stats_unavailable(capsys):
     """pod_count()/pod_resources() floor to 1 / 1 CPU / 1 GB when live stats
     are unreadable. Presenting that to an admin as fact is a lie -- every other
     pods.py consumer gates on pod_count_known() and so must this one."""
-    with patch("iitgpu.admin.get_node_stats", return_value=None), \
-         patch("iitgpu.admin.pod_occupancy", return_value=[None]), \
+    with patch("slurmdeck.admin.get_node_stats", return_value=None), \
+         patch("slurmdeck.admin.pod_occupancy", return_value=[None]), \
          patch("questionary.confirm", return_value=_answer(False)):
         admin._pods_menu(None)
     out = capsys.readouterr().out
@@ -261,11 +261,11 @@ def test_pods_menu_confirms_with_the_derived_sizing_before_resizing():
         prompts.append(msg)
         return _answer(True)
 
-    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
-         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+    with patch("slurmdeck.admin.get_node_stats", return_value=_stats()), \
+         patch("slurmdeck.admin.pod_occupancy", return_value=[None] * 4), \
          patch("questionary.confirm", side_effect=fake_confirm), \
          patch("questionary.text", return_value=_answer("5")), \
-         patch("iitgpu.admin.resize_pod_count",
+         patch("slurmdeck.admin.resize_pod_count",
                return_value=(True, "done")) as rz:
         admin._pods_menu(None, node="iit-MS-7E06")
 
@@ -280,22 +280,22 @@ def test_pods_menu_confirms_with_the_derived_sizing_before_resizing():
 def test_pods_menu_declining_the_sizing_confirm_does_not_resize():
     answers = iter([True, False])  # "Resize?" yes, "Apply this resize?" no
 
-    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
-         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+    with patch("slurmdeck.admin.get_node_stats", return_value=_stats()), \
+         patch("slurmdeck.admin.pod_occupancy", return_value=[None] * 4), \
          patch("questionary.confirm",
                side_effect=lambda *a, **k: _answer(next(answers))), \
          patch("questionary.text", return_value=_answer("5")), \
-         patch("iitgpu.admin.resize_pod_count") as rz:
+         patch("slurmdeck.admin.resize_pod_count") as rz:
         admin._pods_menu(None)
     rz.assert_not_called()
 
 
 def test_pods_menu_rejects_a_degenerate_n_before_confirming(capsys):
-    with patch("iitgpu.admin.get_node_stats", return_value=_stats()), \
-         patch("iitgpu.admin.pod_occupancy", return_value=[None] * 4), \
+    with patch("slurmdeck.admin.get_node_stats", return_value=_stats()), \
+         patch("slurmdeck.admin.pod_occupancy", return_value=[None] * 4), \
          patch("questionary.confirm", return_value=_answer(True)), \
          patch("questionary.text", return_value=_answer("40")), \
-         patch("iitgpu.admin.resize_pod_count") as rz:
+         patch("slurmdeck.admin.resize_pod_count") as rz:
         admin._pods_menu(None)
     rz.assert_not_called()
     assert "0 CPU" in capsys.readouterr().out
@@ -318,7 +318,7 @@ def test_provision_user_uses_full_path_and_sudo_n():
     cmd = r.call_args_list[0][0][0]
     assert cmd[0] == "sudo"
     assert cmd[1] == "-n"
-    assert cmd[2] == "/usr/local/bin/iit-gpu-adduser"
+    assert cmd[2] == "/usr/local/bin/slurm-deck-adduser"
     assert "alice" in cmd
     assert "--admin" in cmd
     assert ok
@@ -326,12 +326,12 @@ def test_provision_user_uses_full_path_and_sudo_n():
 
 def test_provision_user_sets_password_via_chpasswd():
     with patch("subprocess.run", return_value=_proc(out="done")) as r, \
-         patch("iitgpu.admin.daemonclient.create_user", return_value=(True, "ok")), \
-         patch("iitgpu.admin.auditclient.log"):
+         patch("slurmdeck.admin.daemonclient.create_user", return_value=(True, "ok")), \
+         patch("slurmdeck.admin.auditclient.log"):
         ok, msg = admin.provision_user("alice", password="s3cr3t", email="a@b.com")
     assert ok
     cmds = [c[0][0] for c in r.call_args_list]
-    assert any("iit-gpu-adduser" in " ".join(c) for c in cmds)
+    assert any("slurm-deck-adduser" in " ".join(c) for c in cmds)
     chpasswd_call = next(c for c in r.call_args_list if "chpasswd" in c[0][0])
     assert "alice:s3cr3t\n" in (chpasswd_call[1].get("input") or "")
 
@@ -339,9 +339,9 @@ def test_provision_user_sets_password_via_chpasswd():
 def test_provision_user_welcome_sent_with_password():
     """send_welcome must receive the initial password so it can be emailed to the user."""
     with patch("subprocess.run", return_value=_proc(out="done")), \
-         patch("iitgpu.admin.daemonclient.create_user", return_value=(True, "ok")), \
-         patch("iitgpu.admin.auditclient.log"), \
-         patch("iitgpu.mailer.send_welcome", return_value=(True, "sent")) as mock_welcome:
+         patch("slurmdeck.admin.daemonclient.create_user", return_value=(True, "ok")), \
+         patch("slurmdeck.admin.auditclient.log"), \
+         patch("slurmdeck.mailer.send_welcome", return_value=(True, "sent")) as mock_welcome:
         admin.provision_user("alice", password="s3cr3t",
                              email="alice@iit.lk", full_name="Alice")
         import time; time.sleep(0.05)
@@ -354,8 +354,8 @@ def test_provision_user_welcome_sent_with_password():
 def test_provision_user_must_change_pw_flag_set_when_password_given():
     """create_user must be called with must_change_pw=True when a password is set."""
     with patch("subprocess.run", return_value=_proc(out="done")), \
-         patch("iitgpu.admin.daemonclient.create_user", return_value=(True, "ok")) as mock_cu, \
-         patch("iitgpu.admin.auditclient.log"):
+         patch("slurmdeck.admin.daemonclient.create_user", return_value=(True, "ok")) as mock_cu, \
+         patch("slurmdeck.admin.auditclient.log"):
         admin.provision_user("alice", password="s3cr3t",
                              email="alice@iit.lk", role="tool")
     assert mock_cu.called
@@ -366,8 +366,8 @@ def test_provision_user_must_change_pw_flag_set_when_password_given():
 def test_provision_user_must_change_pw_false_when_no_password():
     """must_change_pw must be False when no password is provided at provision time."""
     with patch("subprocess.run", return_value=_proc(out="done")), \
-         patch("iitgpu.admin.daemonclient.create_user", return_value=(True, "ok")) as mock_cu, \
-         patch("iitgpu.admin.auditclient.log"):
+         patch("slurmdeck.admin.daemonclient.create_user", return_value=(True, "ok")) as mock_cu, \
+         patch("slurmdeck.admin.auditclient.log"):
         admin.provision_user("alice", password="", email="alice@iit.lk", role="tool")
     assert mock_cu.called
     _, kwargs = mock_cu.call_args
@@ -396,7 +396,7 @@ def test_offboard_user_uses_full_path_and_sudo_n():
     cmd = r.call_args[0][0]
     assert cmd[0] == "sudo"
     assert cmd[1] == "-n"
-    assert cmd[2] == "/usr/local/bin/iit-gpu-deluser"
+    assert cmd[2] == "/usr/local/bin/slurm-deck-deluser"
     assert "--purge-data" in cmd
     assert ok
 
@@ -424,7 +424,7 @@ def test_run_uses_pipe_when_stdin_data_given():
 def test_read_audit_filters_by_action():
     evs_data = [{"ts": "2026-05-31T10:00:00+00:00", "user": "alice",
                  "action": "job_submit"}]
-    with patch("iitgpu.admin.daemonclient.query_audit", return_value=evs_data):
+    with patch("slurmdeck.admin.daemonclient.query_audit", return_value=evs_data):
         evs = admin.read_audit(action_filter="job_submit")
     assert len(evs) == 1 and evs[0]["user"] == "alice"
 
@@ -432,7 +432,7 @@ def test_read_audit_filters_by_action():
 def test_read_audit_filters_by_user():
     evs_data = [{"ts": "2026-05-31T10:01:00+00:00", "user": "bob",
                  "action": "job_cancel"}]
-    with patch("iitgpu.admin.daemonclient.query_audit", return_value=evs_data):
+    with patch("slurmdeck.admin.daemonclient.query_audit", return_value=evs_data):
         evs = admin.read_audit(user_filter="bob")
     assert len(evs) == 1 and evs[0]["action"] == "job_cancel"
 
@@ -543,9 +543,9 @@ def test_set_qos_priority():
 
 def test_filtered_history_accepts_all_users_flag():
     """filtered_history must accept (search_root, all_users=True) without TypeError."""
-    from iitgpu.slurm import filtered_history, QueueEntry
+    from slurmdeck.slurm import filtered_history, QueueEntry
     fake = [QueueEntry("10", "alice", "COMPLETED", "gpu", "1:00", 1)]
-    with patch("iitgpu.slurm._sacct_history_user", return_value=fake):
+    with patch("slurmdeck.slurm._sacct_history_user", return_value=fake):
         rows = filtered_history("/shared/jobs", all_users=True, days=30)
     assert any(r.job_id == "10" for r in rows)
 
@@ -644,10 +644,10 @@ def test_offboard_user_rejects_bad_username():
 # ── Mail service kill-switch ────────────────────────────────────────────────────
 
 def test_mail_kill_switch_toggle(tmp_path, monkeypatch):
-    from iitgpu import mailer
+    from slurmdeck import mailer
     flag = tmp_path / ".mail-disabled"
     monkeypatch.setattr(mailer, "_mail_flag_path", lambda: str(flag))
-    monkeypatch.setattr("iitgpu.admin.auditclient.log", lambda *a, **k: None)
+    monkeypatch.setattr("slurmdeck.admin.auditclient.log", lambda *a, **k: None)
 
     assert admin.is_mail_disabled() is False
     good, _ = admin.set_mail_disabled("tester")
@@ -657,10 +657,10 @@ def test_mail_kill_switch_toggle(tmp_path, monkeypatch):
 
 
 def test_enable_mail_is_idempotent_when_already_on(tmp_path, monkeypatch):
-    from iitgpu import mailer
+    from slurmdeck import mailer
     flag = tmp_path / ".mail-disabled"
     monkeypatch.setattr(mailer, "_mail_flag_path", lambda: str(flag))
-    monkeypatch.setattr("iitgpu.admin.auditclient.log", lambda *a, **k: None)
+    monkeypatch.setattr("slurmdeck.admin.auditclient.log", lambda *a, **k: None)
     good, _ = admin.enable_mail("tester")   # nothing to remove
     assert good and not flag.exists()
 
@@ -680,7 +680,7 @@ def test_login_as_runs_sudo_iu_for_selected_user(monkeypatch):
                         lambda cmd, *a, **k: calls.setdefault("cmd", cmd))
 
     admin._login_as_menu(style=None)
-    assert calls["cmd"] == ["sudo", "-H", "-u", "sanuth", "/usr/local/bin/iit-gpu-manager"]
+    assert calls["cmd"] == ["sudo", "-H", "-u", "sanuth", "/usr/local/bin/slurm-deck"]
 
 
 def test_login_as_cancel_does_not_launch(monkeypatch):
@@ -689,7 +689,7 @@ def test_login_as_cancel_does_not_launch(monkeypatch):
     ran = {"n": 0}
     monkeypatch.setattr(admin, "list_gpuusers", lambda: ["sanuth"])
     monkeypatch.setattr(admin.getpass, "getuser", lambda: "dahamadmin")
-    monkeypatch.setattr("iitgpu.ui.select_menu", lambda *a, **k: None)
+    monkeypatch.setattr("slurmdeck.ui.select_menu", lambda *a, **k: None)
     monkeypatch.setattr(admin.subprocess, "run",
                         lambda *a, **k: ran.__setitem__("n", ran["n"] + 1))
     admin._login_as_menu(style=None)
@@ -703,7 +703,7 @@ def test_login_as_invalid_username_does_not_launch(monkeypatch):
     ran = {"n": 0}
     monkeypatch.setattr(admin, "list_gpuusers", lambda: ["sanuth"])
     monkeypatch.setattr(admin.getpass, "getuser", lambda: "dahamadmin")
-    monkeypatch.setattr("iitgpu.ui.select_menu", lambda *a, **k: "[cancel]")
+    monkeypatch.setattr("slurmdeck.ui.select_menu", lambda *a, **k: "[cancel]")
     monkeypatch.setattr(admin.subprocess, "run",
                         lambda *a, **k: ran.__setitem__("n", ran["n"] + 1))
     admin._login_as_menu(style=None)
@@ -712,7 +712,7 @@ def test_login_as_invalid_username_does_not_launch(monkeypatch):
 
 def test_gen_password_length_and_charset():
     import string
-    from iitgpu.admin import _gen_password
+    from slurmdeck.admin import _gen_password
     pw = _gen_password()
     assert len(pw) == 8
     assert any(c in string.ascii_lowercase for c in pw)
@@ -722,6 +722,6 @@ def test_gen_password_length_and_charset():
 
 
 def test_gen_password_unique():
-    from iitgpu.admin import _gen_password
+    from slurmdeck.admin import _gen_password
     passwords = {_gen_password() for _ in range(50)}
     assert len(passwords) > 1

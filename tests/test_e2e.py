@@ -12,7 +12,7 @@ def test_selftest_passes():
     repo_root = str(Path(__file__).parent.parent)
     pythonpath = os.pathsep.join(filter(None, [repo_root, os.environ.get("PYTHONPATH", "")]))
     result = subprocess.run(
-        [sys.executable, "-m", "iitgpu", "--selftest"],
+        [sys.executable, "-m", "slurmdeck", "--selftest"],
         capture_output=True, text=True,
         env={**os.environ, "DEMO_MODE": "1", "PYTHONPATH": pythonpath},
     )
@@ -24,9 +24,9 @@ def test_demo_submit_and_queue(tmp_path, monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "1")
     monkeypatch.setenv("NFS_ROOT", str(tmp_path))
 
-    from iitgpu.config import load_config, jobs_dir
-    from iitgpu.jobs import JobSpec, make_job_folder, write_sbatch
-    from iitgpu.slurm import queue, submit_job
+    from slurmdeck.config import load_config, jobs_dir
+    from slurmdeck.jobs import JobSpec, make_job_folder, write_sbatch
+    from slurmdeck.slurm import queue, submit_job
 
     cfg = load_config()
     jdir = jobs_dir(cfg)
@@ -64,7 +64,7 @@ def test_three_audit_events_spooled(tmp_path, monkeypatch):
     monkeypatch.setenv("AUDIT_SPOOL", str(spool_dir))
 
     import importlib
-    import iitgpu.auditclient as ac
+    import slurmdeck.auditclient as ac
     importlib.reload(ac)
 
     ac.log("e2e_event_1", detail="test")

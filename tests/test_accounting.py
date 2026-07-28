@@ -2,8 +2,8 @@
 """Phase 4: usage/accounting reports."""
 from unittest.mock import patch, MagicMock
 import pytest
-from iitgpu import accounting
-from iitgpu.accounting import _elapsed_to_hours, usage_by_user, fairshare
+from slurmdeck import accounting
+from slurmdeck.accounting import _elapsed_to_hours, usage_by_user, fairshare
 
 
 def test_elapsed_to_hours_basic():

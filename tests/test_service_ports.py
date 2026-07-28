@@ -7,14 +7,14 @@ moved to 8889 ("The port 8888 is already in use, trying another port") while
 the printed instructions still said 8888, so the user's tunnel reached nothing
 and the notebook looked broken.
 
-The port is therefore resolved at job runtime into $IIT_PORT, and every place
+The port is therefore resolved at job runtime into $SD_PORT, and every place
 that names a port uses that one variable.
 """
 import re
 
 import pytest
 
-from iitgpu.jobs import (
+from slurmdeck.jobs import (
     JobSpec, render_notebook_sbatch, render_tensorboard_sbatch,
 )
 
@@ -45,30 +45,30 @@ def _tensorboard(tmp_path, **kw):
 @pytest.mark.parametrize("render", [_notebook, _tensorboard])
 def test_port_is_resolved_at_runtime(tmp_path, render):
     script = render(tmp_path)
-    assert "IIT_PORT=$(python3" in script
+    assert "SD_PORT=$(python3" in script
     # ...and the resolver must come before the instructions that quote it.
-    assert script.index("IIT_PORT=$(python3") < script.index("$IIT_PORT:$IIT_NODE_ADDR")
+    assert script.index("SD_PORT=$(python3") < script.index("$SD_PORT:$SD_NODE_ADDR")
 
 
 @pytest.mark.parametrize("render", [_notebook, _tensorboard])
 def test_tunnel_and_service_agree_on_the_port(tmp_path, render):
     script = render(tmp_path)
-    assert "-L $IIT_PORT:$IIT_NODE_ADDR:$IIT_PORT" in script
+    assert "-L $SD_PORT:$SD_NODE_ADDR:$SD_PORT" in script
 
 
 def test_jupyter_binds_the_advertised_port_and_never_drifts(tmp_path):
     script = _notebook(tmp_path)
-    assert "--port=$IIT_PORT" in script
+    assert "--port=$SD_PORT" in script
     # Without this, a lost race silently moves Jupyter to another port and the
     # printed tunnel is wrong again — the original bug.
     assert "--port-retries=0" in script
-    assert "http://127.0.0.1:$IIT_PORT/lab?token=$JUPYTER_TOKEN" in script
+    assert "http://127.0.0.1:$SD_PORT/lab?token=$JUPYTER_TOKEN" in script
 
 
 def test_tensorboard_serves_the_advertised_port(tmp_path):
     script = _tensorboard(tmp_path)
-    assert "--port $IIT_PORT" in script
-    assert "http://127.0.0.1:$IIT_PORT" in script
+    assert "--port $SD_PORT" in script
+    assert "http://127.0.0.1:$SD_PORT" in script
 
 
 # ── No stale hardcoded port may survive anywhere that names one ───────────────
@@ -97,7 +97,7 @@ def _run_resolver(script: str, job_id: str, occupied: list[int]) -> int:
     import subprocess
     import sys
 
-    body = re.search(r"IIT_PORT=\$\(python3 <<'PYEOF'\n(.*?)\nPYEOF",
+    body = re.search(r"SD_PORT=\$\(python3 <<'PYEOF'\n(.*?)\nPYEOF",
                      script, re.S).group(1)
     held = []
     try:
@@ -137,27 +137,27 @@ def test_resolver_spreads_concurrent_jobs_across_ports(tmp_path):
 def test_notebook_script_writes_ready_marker_when_port_answers(tmp_path):
     """RUNNING is not "ready": the TUI shows STARTING until the server accepts
     connections. The job itself is the only thing positioned to know, so it
-    writes .iit-ready once the port answers — pure bash /dev/tcp, no deps."""
+    writes .sd-ready once the port answers — pure bash /dev/tcp, no deps."""
     script = _notebook(tmp_path)
-    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in script
-    assert f"{tmp_path}/.iit-ready" in script
+    assert "/dev/tcp/$SD_NODE_ADDR/$SD_PORT" in script
+    assert f"{tmp_path}/.sd-ready" in script
     # watcher must be backgrounded BEFORE the (blocking) jupyter line
     assert script.index("/dev/tcp") < script.index("jupyter lab --no-browser")
 
 
 def test_ready_watcher_present_in_container_path_too(tmp_path):
-    from iitgpu.jobs import JobSpec, render_notebook_sbatch
+    from slurmdeck.jobs import JobSpec, render_notebook_sbatch
     spec = JobSpec(job_name="nb", partition="gpu", gpu_shards=1, cpus=8,
                    mem_gb=14, time_limit="08:00:00", run_command="",
                    task_type="notebook", container_image="/shared/images/x.sif")
     s = render_notebook_sbatch(spec, str(tmp_path), port=8888,
                                gateway_host="gw.edu", gateway_port=2225)
-    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in s and ".iit-ready" in s
+    assert "/dev/tcp/$SD_NODE_ADDR/$SD_PORT" in s and ".sd-ready" in s
 
 
 def test_ready_watcher_probes_the_address_jupyter_binds(tmp_path):
-    """Jupyter binds $IIT_NODE_ADDR, not loopback — probing 127.0.0.1 made the
+    """Jupyter binds $SD_NODE_ADDR, not loopback — probing 127.0.0.1 made the
     marker never fire on the real cluster (live job 344): STARTING forever."""
     script = _notebook(tmp_path)
-    assert "/dev/tcp/$IIT_NODE_ADDR/$IIT_PORT" in script
+    assert "/dev/tcp/$SD_NODE_ADDR/$SD_PORT" in script
     assert "/dev/tcp/127.0.0.1" not in script

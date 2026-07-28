@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# deploy/install.sh — IIT-GPU-Manager system installer. Run as root.
+# deploy/install.sh — Slurm Deck system installer. Run as root.
 set -euo pipefail
 
-INSTALL_DIR="/opt/iit-gpu"
-BIN_PATH="/usr/local/bin/iit-gpu-manager"
-SERVICE_FILE="/etc/systemd/system/iit-gpu-audit.service"
-SSHD_DROP_IN="/etc/ssh/sshd_config.d/99-iit-gpu-gateway.conf"
-SUDOERS_FILE="/etc/sudoers.d/iit-gpu-gateway"
-STATE_DIR="/var/lib/iit-gpu"
+INSTALL_DIR="/opt/slurm-deck"
+BIN_PATH="/usr/local/bin/slurm-deck"
+SERVICE_FILE="/etc/systemd/system/slurm-deck-audit.service"
+SSHD_DROP_IN="/etc/ssh/sshd_config.d/99-slurm-deck-gateway.conf"
+SUDOERS_FILE="/etc/sudoers.d/slurm-deck-gateway"
+STATE_DIR="/var/lib/slurm-deck"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Configurable via env vars so the installer works for non-default layouts.
@@ -85,10 +85,10 @@ sudo -u "${GATEWAY_USER}" "${CONDA_PREFIX}/bin/conda" init bash 2>/dev/null || t
 
 # ── conda.sh in /etc/bash.bashrc (covers non-interactive sbatch scripts) ──────
 echo "==> Adding conda.sh to /etc/bash.bashrc..."
-if ! grep -q "miniforge3\|CONDA_PREFIX_SHARED\|iit-gpu conda" /etc/bash.bashrc 2>/dev/null; then
+if ! grep -q "miniforge3\|CONDA_PREFIX_SHARED\|slurm-deck conda" /etc/bash.bashrc 2>/dev/null; then
     cat >> /etc/bash.bashrc << BASHRC
 
-# conda — added by IIT-GPU-Manager installer
+# conda — added by Slurm Deck installer
 [ -f "${CONDA_SH}" ] && source "${CONDA_SH}"
 BASHRC
 fi
@@ -117,7 +117,7 @@ usermod -aG gpuusers gpusync
 install -d -o gpusync -g auditadmin -m 0750 "${STATE_DIR}"
 
 # ── SLURM job-completion email (MailProg) ─────────────────────────────────────
-# slurmctld invokes MailProg (/usr/local/bin/iit-gpu-mailer) as SlurmUser — the
+# slurmctld invokes MailProg (/usr/local/bin/slurm-deck-mailer) as SlurmUser — the
 # `slurm` account, not root. The mailer reads the Resend API key from
 # deploy/secrets.env (0640 root:gpusync), so `slurm` MUST be in the gpusync group
 # or every BEGIN/END/FAIL job email is silently dropped (key read fails →
@@ -144,25 +144,25 @@ exec env -i \\
     PATH="${CONDA_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin" \\
     SSH_CLIENT="\${SSH_CLIENT:-}" \\
     TERM="\${TERM:-xterm}" \\
-    PYTHONPATH="/opt/iit-gpu" \\
+    PYTHONPATH="/opt/slurm-deck" \\
     CONDA_PREFIX_SHARED="${CONDA_PREFIX}" \\
     NFS_ROOT="${NFS_ROOT}" \\
-    /usr/bin/python3 -m iitgpu
+    /usr/bin/python3 -m slurmdeck
 LAUNCHER
 chmod 0755 "${BIN_PATH}"
 
 # ── Gateway ForceCommand wrapper (scp/rsync passthrough) ──────────────────────
-echo "==> Installing gateway ForceCommand wrapper at /usr/local/bin/iit-gpu-gateway..."
-GATEWAY_PATH="/usr/local/bin/iit-gpu-gateway"
-sed "s|__NFS_ROOT__||g" "${SCRIPT_DIR}/iit-gpu-gateway" > "${GATEWAY_PATH}"
+echo "==> Installing gateway ForceCommand wrapper at /usr/local/bin/slurm-deck-gateway..."
+GATEWAY_PATH="/usr/local/bin/slurm-deck-gateway"
+sed "s|__NFS_ROOT__||g" "${SCRIPT_DIR}/slurm-deck-gateway" > "${GATEWAY_PATH}"
 chmod 0755 "${GATEWAY_PATH}"
 
 # ── systemd service ───────────────────────────────────────────────────────────
 echo "==> Installing systemd service..."
-cp "${SCRIPT_DIR}/iit-gpu-audit.service" "${SERVICE_FILE}"
+cp "${SCRIPT_DIR}/slurm-deck-audit.service" "${SERVICE_FILE}"
 systemctl daemon-reload
-systemctl enable iit-gpu-audit.service
-systemctl restart iit-gpu-audit.service
+systemctl enable slurm-deck-audit.service
+systemctl restart slurm-deck-audit.service
 
 # ── sshd drop-in ─────────────────────────────────────────────────────────────
 echo "==> Installing sshd drop-in..."
@@ -186,11 +186,11 @@ fi
 
 # ── admin log viewer ──────────────────────────────────────────────────────────
 echo "==> Installing admin log viewer..."
-install -o root -g auditadmin -m 0750 "${SCRIPT_DIR}/iit-gpu-log" /usr/local/bin/iit-gpu-log
+install -o root -g auditadmin -m 0750 "${SCRIPT_DIR}/slurm-deck-log" /usr/local/bin/slurm-deck-log
 
 echo ""
 echo "Installation complete."
 echo "  conda prefix : ${CONDA_PREFIX}"
 echo "  NFS root     : ${NFS_ROOT}"
 echo "  Add a user   : usermod -aG gpuusers <username>"
-echo "  Daemon status: systemctl status iit-gpu-audit"
+echo "  Daemon status: systemctl status slurm-deck-audit"

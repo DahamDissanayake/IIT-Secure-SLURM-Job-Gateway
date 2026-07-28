@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "iit-gpu-manager",
-  "description": "IIT GPU Manager (IIT Secure SLURM Job Gateway) — a hardened, menu-driven TUI gateway for shared SLURM/GPU clusters. Includes the igm-installer skill for a guided, checkpointed install.",
+  "name": "slurm-deck",
+  "description": "Slurm Deck — a hardened, menu-driven TUI gateway for shared SLURM/GPU clusters. Includes the slurm-deck-installer skill for a guided, checkpointed install.",
   "owner": {
     "name": "Daham Dissanayake"
   },
   "plugins": [
     {
-      "name": "igm-installer",
-      "description": "Guided, checkpointed installer for the IIT GPU Manager — walks through prerequisites, site.env, install.sh, admin sudoers, GPU-host SSH, service verification, first-admin provisioning, and optional GPU sharing config, pausing for explicit confirmation before every root/sudo/system-mutating step.",
+      "name": "slurm-deck-installer",
+      "description": "Guided, checkpointed installer for the Slurm Deck — walks through prerequisites, site.env, install.sh, admin sudoers, GPU-host SSH, service verification, first-admin provisioning, and optional GPU sharing config, pausing for explicit confirmation before every root/sudo/system-mutating step.",
       "source": "./",
       "category": "infrastructure"
     }

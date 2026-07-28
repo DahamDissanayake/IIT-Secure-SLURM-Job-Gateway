@@ -1,0 +1,10 @@
+[Unit]
+Description=Run slurm-deck-pod-notify every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=slurm-deck-pod-notify.service
+
+[Install]
+WantedBy=timers.target

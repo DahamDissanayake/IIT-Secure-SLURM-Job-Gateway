@@ -134,7 +134,7 @@ def test_live_path_creates_the_remote_staging_dir_before_scp(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "resize applied" in result.stdout
     calls = log.read_text()
-    mkdir_i = calls.index("mkdir -p '/tmp/iit-resize-")
+    mkdir_i = calls.index("mkdir -p '/tmp/slurm-deck-resize-")
     scp_i = calls.index("scp ")
     assert mkdir_i < scp_i, calls  # dir must exist before scp targets it
 
@@ -149,8 +149,8 @@ def test_verify_mismatch_rolls_back_the_gpu_host_too(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "rollback performed" in result.stderr
     calls = log.read_text()
-    assert "mkdir -p '/tmp/iit-resize-rollback-" in calls
-    assert "iit-resize-rollback-" in calls.split("mkdir -p '/tmp/iit-resize-rollback-")[1]
+    assert "mkdir -p '/tmp/slurm-deck-resize-rollback-" in calls
+    assert "slurm-deck-resize-rollback-" in calls.split("mkdir -p '/tmp/slurm-deck-resize-rollback-")[1]
     # local config really went back to the pre-resize count
     assert "Name=shard Count=4" in (conf / "gres.conf").read_text()
     assert "Gres=gpu:1,shard:4" in (conf / "slurm.conf").read_text()
@@ -161,7 +161,7 @@ def test_gpu_sync_failure_routes_into_the_same_rollback(tmp_path):
     before the rollback/resume block ever ran, leaving the login node rewritten
     and the GPU host untouched (I3)."""
     conf = _fake_conf_dir(tmp_path)
-    env, log = _live_env(tmp_path, conf, FAIL_SCP_MATCH="/tmp/iit-resize-2")
+    env, log = _live_env(tmp_path, conf, FAIL_SCP_MATCH="/tmp/slurm-deck-resize-2")
     result = _run(["5"], env)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "GPU-host sync/restart failed" in result.stderr
@@ -169,7 +169,7 @@ def test_gpu_sync_failure_routes_into_the_same_rollback(tmp_path):
     assert "resize applied" not in result.stdout
     assert "Name=shard Count=4" in (conf / "gres.conf").read_text()
     calls = log.read_text()
-    assert "/tmp/iit-resize-rollback-" in calls
+    assert "/tmp/slurm-deck-resize-rollback-" in calls
     assert "state=resume" in calls.lower()
 
 
@@ -179,7 +179,7 @@ def test_failed_rollback_is_reported_not_silently_swallowed(tmp_path):
     mechanism exists to surface."""
     conf = _fake_conf_dir(tmp_path)
     env, log = _live_env(tmp_path, conf, REPORTED_SHARDS="4",
-                         FAIL_SCP_MATCH="iit-resize-rollback-")
+                         FAIL_SCP_MATCH="slurm-deck-resize-rollback-")
     result = _run(["5"], env)
     assert result.returncode == 2, result.stdout + result.stderr
     assert "CRITICAL" in result.stderr

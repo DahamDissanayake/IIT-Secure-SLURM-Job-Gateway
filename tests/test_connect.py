@@ -3,7 +3,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from iitgpu.connect import ConnectInfo, marker_path, parse_connect, render_card, wait_ready
+from slurmdeck.connect import ConnectInfo, marker_path, parse_connect, render_card, wait_ready
 
 SAMPLE_OUT = """=================================================
 JupyterLab is starting on the GPU node.
@@ -91,7 +91,7 @@ def test_wait_ready_without_should_stop_still_sleeps(tmp_path, monkeypatch):
     """should_stop=None (the default) must not change existing behaviour —
     still a plain timed sleep, no should_stop call at all."""
     slept = []
-    monkeypatch.setattr("iitgpu.connect.time.sleep", lambda s: slept.append(s))
+    monkeypatch.setattr("slurmdeck.connect.time.sleep", lambda s: slept.append(s))
     marker_path(str(tmp_path)).touch()
     result = wait_ready(str(tmp_path), is_alive=lambda: True, timeout=90,
                         poll=2.0, should_stop=None)

@@ -10,7 +10,7 @@
 # measurement artifact of this host's `mkdir` binary -- uutils coreutils
 # 0.8.0 -- mishandling ACL-bearing parent directories. Checked against the
 # raw syscall, `python3 -c "import os; os.mkdir(...)"`, setgid inherits
-# fine. See iitgpu/jobs.py make_job_folder for the live comparison. On this
+# fine. See slurmdeck/jobs.py make_job_folder for the live comparison. On this
 # host, verify mode-bit behaviour with a raw syscall, not a coreutils
 # binary.)
 #
@@ -156,7 +156,7 @@ if [ "$fail" -ne 0 ]; then
     echo
     echo "Fix on the GPU HOST (the NFS server — root is squashed on the login node)."
     echo "From a shell on the GPU host:"
-    echo "  ssh slurmadmin@192.168.122.10 'cat /opt/iit-gpu/deploy/fix-shared-perms.sh' > /tmp/fix-shared-perms.sh"
+    echo "  ssh slurmadmin@192.168.122.10 'cat /opt/slurm-deck/deploy/fix-shared-perms.sh' > /tmp/fix-shared-perms.sh"
     echo "  sudo bash /tmp/fix-shared-perms.sh"
     exit 1
 fi

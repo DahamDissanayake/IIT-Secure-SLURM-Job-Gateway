@@ -5,8 +5,8 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
-from iitgpu.ui import BACK, BACK_TO_MAIN
-from iitgpu.upload import (
+from slurmdeck.ui import BACK, BACK_TO_MAIN
+from slurmdeck.upload import (
     _validate_folder_name,
     _ensure_folder,
     _download_from_url,
@@ -82,33 +82,33 @@ class TestDownloadFromUrl:
 
     def test_rejects_ftp_url(self, capsys):
         with patch("questionary.text", return_value=self._make_text_mock("ftp://evil.com/file")), \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             _download_from_url("/shared/folder")
         out = capsys.readouterr().out
         assert "https" in out or "http" in out  # err message shown
 
     def test_rejects_empty_input(self):
         with patch("questionary.text", return_value=self._make_text_mock("")), \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             _download_from_url("/shared/folder")  # should return without subprocess
 
     def test_rejects_path_outside_jail(self):
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/file.tar")), \
-             patch("iitgpu.upload.screen"), \
-             patch("iitgpu.upload.in_jail", return_value=False), \
-             patch("iitgpu.upload.auditclient"), \
+             patch("slurmdeck.upload.screen"), \
+             patch("slurmdeck.upload.in_jail", return_value=False), \
+             patch("slurmdeck.upload.auditclient"), \
              patch("subprocess.run") as mock_run:
             _download_from_url("/shared/folder")
             mock_run.assert_not_called()
 
     def test_logs_url_to_audit(self):
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/data.zip")), \
-             patch("iitgpu.upload.screen"), \
-             patch("iitgpu.upload.in_jail", return_value=True), \
-             patch("iitgpu.upload.auditclient") as mock_audit, \
+             patch("slurmdeck.upload.screen"), \
+             patch("slurmdeck.upload.in_jail", return_value=True), \
+             patch("slurmdeck.upload.auditclient") as mock_audit, \
              patch("subprocess.run", return_value=MagicMock(returncode=0)), \
-             patch("iitgpu.upload.info"), \
-             patch("iitgpu.upload.ok"), \
+             patch("slurmdeck.upload.info"), \
+             patch("slurmdeck.upload.ok"), \
              patch("pathlib.Path.stat", return_value=MagicMock(st_size=1024)), \
              patch("pathlib.Path.exists", return_value=True):
             _download_from_url("/shared/folder")
@@ -124,11 +124,11 @@ class TestDownloadFromUrl:
             return MagicMock(returncode=0)
 
         with patch("questionary.text", return_value=self._make_text_mock("https://example.com/data.tar")), \
-             patch("iitgpu.upload.screen"), \
-             patch("iitgpu.upload.in_jail", return_value=True), \
-             patch("iitgpu.upload.auditclient"), \
-             patch("iitgpu.upload.info"), \
-             patch("iitgpu.upload.ok"), \
+             patch("slurmdeck.upload.screen"), \
+             patch("slurmdeck.upload.in_jail", return_value=True), \
+             patch("slurmdeck.upload.auditclient"), \
+             patch("slurmdeck.upload.info"), \
+             patch("slurmdeck.upload.ok"), \
              patch("subprocess.run", side_effect=fake_run), \
              patch("pathlib.Path.stat", return_value=MagicMock(st_size=0)), \
              patch("pathlib.Path.exists", return_value=True):
@@ -146,7 +146,7 @@ class TestBrowseFolder:
     def test_empty_folder(self, tmp_path, capsys):
         with patch("questionary.press_any_key_to_continue") as mock_key:
             mock_key.return_value.ask.return_value = None
-            with patch("iitgpu.upload.screen"):
+            with patch("slurmdeck.upload.screen"):
                 _browse_folder(str(tmp_path))
         out = capsys.readouterr().out
         assert "empty" in out.lower()
@@ -156,7 +156,7 @@ class TestBrowseFolder:
         (tmp_path / "subdir").mkdir()
         with patch("questionary.press_any_key_to_continue") as mock_key:
             mock_key.return_value.ask.return_value = None
-            with patch("iitgpu.upload.screen"):
+            with patch("slurmdeck.upload.screen"):
                 _browse_folder(str(tmp_path))
         out = capsys.readouterr().out
         assert "train.csv" in out
@@ -177,20 +177,20 @@ class TestRunUpload:
         """The user's own upload folder (shared/users/<username>) — uploads are
         always scoped here, for admins and regular users alike."""
         import getpass
-        from iitgpu.validate import user_upload_root
+        from slurmdeck.validate import user_upload_root
         return Path(user_upload_root(str(tmp_path), getpass.getuser()))
 
     def test_cancel_exits_without_creating_anything(self, tmp_path, monkeypatch):
         """Selecting [cancel] returns without creating any data folder."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
 
         monkeypatch.setattr(
             "questionary.select",
             lambda *a, **kw: self._sel(BACK),
         )
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
         # The user's own folder is prepared but left empty — no data folder made.
         assert list(self._udir(tmp_path).iterdir()) == []
@@ -198,8 +198,8 @@ class TestRunUpload:
     def test_select_existing_folder_uses_it_directly(self, tmp_path, monkeypatch):
         """Picking an existing folder skips the name-entry prompt entirely."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
-        monkeypatch.setattr("iitgpu.auditclient.log", lambda *a, **kw: None)
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
+        monkeypatch.setattr("slurmdeck.auditclient.log", lambda *a, **kw: None)
 
         existing = self._udir(tmp_path) / "my-dataset"
         existing.mkdir(parents=True)
@@ -211,7 +211,7 @@ class TestRunUpload:
             lambda *a, **kw: self._sel(next(sel_responses)),
         )
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         assert existing.is_dir()
@@ -222,8 +222,8 @@ class TestRunUpload:
         """Choosing [create new folder] prompts for a name and creates the directory
         inside the user's own folder."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
-        monkeypatch.setattr("iitgpu.auditclient.log", lambda *a, **kw: None)
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
+        monkeypatch.setattr("slurmdeck.auditclient.log", lambda *a, **kw: None)
 
         # First select: "create new"; second select: Back to main menu
         sel_responses = iter(["__new__", BACK_TO_MAIN])
@@ -236,7 +236,7 @@ class TestRunUpload:
             lambda *a, **kw: self._sel("newdataset"),
         )
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         assert (self._udir(tmp_path) / "newdataset").is_dir()
@@ -244,7 +244,7 @@ class TestRunUpload:
     def test_existing_folders_appear_in_choices(self, tmp_path, monkeypatch):
         """Existing subdirectories of the user's own folder are listed as choices."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
 
         udir = self._udir(tmp_path)
         (udir / "alpha").mkdir(parents=True)
@@ -262,7 +262,7 @@ class TestRunUpload:
 
         monkeypatch.setattr("questionary.select", fake_select)
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         assert str(udir / "alpha") in choices_seen
@@ -273,7 +273,7 @@ class TestRunUpload:
     def test_no_existing_folders_still_offers_create(self, tmp_path, monkeypatch):
         """With an empty nfs_root, the prompt still offers [create new folder]."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
 
         choices_seen: list = []
 
@@ -287,7 +287,7 @@ class TestRunUpload:
 
         monkeypatch.setattr("questionary.select", fake_select)
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         assert "__new__" in choices_seen
@@ -296,11 +296,11 @@ class TestRunUpload:
     def test_audit_log_called_on_folder_open(self, tmp_path, monkeypatch):
         """run_upload logs data_folder_open after the folder is ready."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
 
         logged = []
         monkeypatch.setattr(
-            "iitgpu.auditclient.log",
+            "slurmdeck.auditclient.log",
             lambda action, **kw: logged.append((action, kw)),
         )
 
@@ -313,7 +313,7 @@ class TestRunUpload:
             lambda *a, **kw: self._sel(next(sel_responses)),
         )
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         assert any(action == "data_folder_open" for action, _ in logged)
@@ -323,9 +323,9 @@ class TestRunUpload:
         folder — the upload picker must never offer the shared root or other
         top-level shared dirs (which include non-writable parents like users)."""
         monkeypatch.setenv("NFS_ROOT", str(tmp_path))
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         # Force admin: it must not change the upload scope.
-        monkeypatch.setattr("iitgpu.config.is_admin", lambda *a, **kw: True)
+        monkeypatch.setattr("slurmdeck.config.is_admin", lambda *a, **kw: True)
 
         # Sibling top-level shared dirs that must NOT appear as upload targets.
         for sib in ("jobs", "models", "envs", "users"):
@@ -343,7 +343,7 @@ class TestRunUpload:
 
         monkeypatch.setattr("questionary.select", fake_select)
 
-        from iitgpu.upload import run_upload
+        from slurmdeck.upload import run_upload
         run_upload()
 
         udir = str(self._udir(tmp_path))
@@ -362,17 +362,17 @@ class TestRunUpload:
 class TestShowScpInstructions:
     def _make_cfg(self, gateway_host="10.35.4.100", gateway_port="2225"):
         import dataclasses
-        from iitgpu.config import load_config
+        from slurmdeck.config import load_config
         cfg = load_config()
         return dataclasses.replace(cfg, gateway_host=gateway_host, gateway_port=gateway_port)
 
     def test_uses_gateway_host_not_socket_hostname(self, capsys, monkeypatch):
         """Output must reference cfg.gateway_host, not socket.gethostname()."""
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         cfg = self._make_cfg(gateway_host="10.35.4.100", gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -382,11 +382,11 @@ class TestShowScpInstructions:
 
     def test_scp_uses_uppercase_P_for_port(self, capsys, monkeypatch):
         """scp port flag must be -P (uppercase), not -p."""
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         cfg = self._make_cfg(gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -395,11 +395,11 @@ class TestShowScpInstructions:
 
     def test_rsync_uses_ssh_p_for_port(self, capsys, monkeypatch):
         """rsync port is passed via -e 'ssh -p PORT'."""
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         cfg = self._make_cfg(gateway_port="2225")
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/mydata", cfg)
 
@@ -408,11 +408,11 @@ class TestShowScpInstructions:
 
     def test_folder_path_is_quoted(self, capsys, monkeypatch):
         """Remote path must be wrapped in double-quotes to handle spaces."""
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         cfg = self._make_cfg()
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/my folder", cfg)
 
@@ -422,11 +422,11 @@ class TestShowScpInstructions:
     def test_data_ref_path_is_quoted(self, capsys, monkeypatch):
         """The job-script reference line must quote the folder path prefix so
         paths with spaces work when pasted into a job script."""
-        monkeypatch.setenv("IIT_SITE_ENV", "/nonexistent")
+        monkeypatch.setenv("SD_SITE_ENV", "/nonexistent")
         cfg = self._make_cfg()
 
         with patch("questionary.press_any_key_to_continue") as mock_key, \
-             patch("iitgpu.upload.screen"):
+             patch("slurmdeck.upload.screen"):
             mock_key.return_value.ask.return_value = None
             _show_scp_instructions("/shared/my folder", cfg)
 
@@ -440,19 +440,19 @@ class TestUnzip:
 
     def _cfg(self, tmp_path):
         import dataclasses
-        from iitgpu.config import load_config
+        from slurmdeck.config import load_config
         return dataclasses.replace(load_config(), nfs_root=str(tmp_path))
 
     def _user_folder(self, tmp_path):
         import getpass
-        from iitgpu.validate import user_upload_root
+        from slurmdeck.validate import user_upload_root
         folder = Path(user_upload_root(str(tmp_path), getpass.getuser())) / "ds"
         folder.mkdir(parents=True, exist_ok=True)
         return folder
 
     def test_extracts_zip_into_named_subfolder(self, tmp_path):
         import zipfile
-        from iitgpu import upload
+        from slurmdeck import upload
         cfg = self._cfg(tmp_path)
         folder = self._user_folder(tmp_path)
         zpath = folder / "dataset.zip"
@@ -461,10 +461,10 @@ class TestUnzip:
             zf.writestr("sub/b.txt", "world")
 
         sel = MagicMock(); sel.ask.return_value = str(zpath)
-        with patch("iitgpu.upload.questionary.select", return_value=sel), \
-             patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
-             patch("iitgpu.upload.auditclient"), \
-             patch("iitgpu.upload.screen"):
+        with patch("slurmdeck.upload.questionary.select", return_value=sel), \
+             patch("slurmdeck.upload.questionary.press_any_key_to_continue") as k, \
+             patch("slurmdeck.upload.auditclient"), \
+             patch("slurmdeck.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
 
@@ -475,8 +475,8 @@ class TestUnzip:
     def test_zip_slip_traversal_is_blocked(self, tmp_path):
         import zipfile
         import getpass
-        from iitgpu import upload
-        from iitgpu.validate import user_upload_root
+        from slurmdeck import upload
+        from slurmdeck.validate import user_upload_root
         cfg = self._cfg(tmp_path)
         folder = self._user_folder(tmp_path)
         zpath = folder / "evil.zip"
@@ -484,10 +484,10 @@ class TestUnzip:
             zf.writestr("../../escape.txt", "pwned")
 
         sel = MagicMock(); sel.ask.return_value = str(zpath)
-        with patch("iitgpu.upload.questionary.select", return_value=sel), \
-             patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
-             patch("iitgpu.upload.auditclient"), \
-             patch("iitgpu.upload.screen"):
+        with patch("slurmdeck.upload.questionary.select", return_value=sel), \
+             patch("slurmdeck.upload.questionary.press_any_key_to_continue") as k, \
+             patch("slurmdeck.upload.auditclient"), \
+             patch("slurmdeck.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
 
@@ -497,13 +497,13 @@ class TestUnzip:
         assert not (folder / "escape.txt").exists()
 
     def test_no_zip_files_is_handled(self, tmp_path):
-        from iitgpu import upload
+        from slurmdeck import upload
         cfg = self._cfg(tmp_path)
         folder = self._user_folder(tmp_path)
         # No .zip present → must not raise, just inform and return.
-        with patch("iitgpu.upload.questionary.press_any_key_to_continue") as k, \
-             patch("iitgpu.upload.questionary.select") as sel, \
-             patch("iitgpu.upload.screen"):
+        with patch("slurmdeck.upload.questionary.press_any_key_to_continue") as k, \
+             patch("slurmdeck.upload.questionary.select") as sel, \
+             patch("slurmdeck.upload.screen"):
             k.return_value.ask.return_value = None
             upload._unzip_in_folder(str(folder), cfg)
             sel.assert_not_called()
@@ -515,7 +515,7 @@ class TestRunUploadReturnsPath:
     @staticmethod
     def _cfg(tmp_path):
         import dataclasses
-        from iitgpu.config import load_config
+        from slurmdeck.config import load_config
         import os
         os.environ["NFS_ROOT"] = str(tmp_path)
         return load_config()
@@ -523,8 +523,8 @@ class TestRunUploadReturnsPath:
     def test_returns_folder_path_on_back(self, tmp_path, monkeypatch):
         """When user navigates in and then chooses Back, run_upload returns the folder."""
         import getpass
-        from iitgpu import upload
-        from iitgpu.validate import user_upload_root
+        from slurmdeck import upload
+        from slurmdeck.validate import user_upload_root
 
         cfg = self._cfg(tmp_path)
         user = getpass.getuser()
@@ -535,13 +535,13 @@ class TestRunUploadReturnsPath:
             BACK_TO_MAIN,                       # then Back
         ])
         monkeypatch.setattr(
-            "iitgpu.upload.questionary.select",
+            "slurmdeck.upload.questionary.select",
             lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: next(sel_responses))})(),
         )
-        monkeypatch.setattr("iitgpu.upload.questionary.text", lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: "")})())
-        monkeypatch.setattr("iitgpu.upload.auditclient.log", lambda *a, **kw: None)
-        monkeypatch.setattr("iitgpu.upload.ok", lambda *a, **kw: None)
-        monkeypatch.setattr("iitgpu.upload.err", lambda *a, **kw: None)
+        monkeypatch.setattr("slurmdeck.upload.questionary.text", lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: "")})())
+        monkeypatch.setattr("slurmdeck.upload.auditclient.log", lambda *a, **kw: None)
+        monkeypatch.setattr("slurmdeck.upload.ok", lambda *a, **kw: None)
+        monkeypatch.setattr("slurmdeck.upload.err", lambda *a, **kw: None)
 
         result = upload.run_upload()
         assert result is not None
@@ -549,14 +549,14 @@ class TestRunUploadReturnsPath:
 
     def test_returns_none_on_cancel(self, tmp_path, monkeypatch):
         """Cancelling at folder-select must return None (no path was chosen)."""
-        from iitgpu import upload
+        from slurmdeck import upload
         self._cfg(tmp_path)
 
         monkeypatch.setattr(
-            "iitgpu.upload.questionary.select",
+            "slurmdeck.upload.questionary.select",
             lambda *a, **kw: type("R", (), {"ask": staticmethod(lambda: BACK)})(),
         )
-        monkeypatch.setattr("iitgpu.upload.auditclient.log", lambda *a, **kw: None)
+        monkeypatch.setattr("slurmdeck.upload.auditclient.log", lambda *a, **kw: None)
 
         result = upload.run_upload()
         assert result is None

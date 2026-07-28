@@ -80,7 +80,7 @@ Keep `no_root_squash` only if a documented workflow needs root writes over NFS.
 
 ---
 
-## Phase 1 — Per-user identity (see also deploy/iit-gpu-adduser.sh)
+## Phase 1 — Per-user identity (see also deploy/slurm-deck-adduser.sh)
 
 ### 1.0a [LOGIN+GPU-HOST] Provisioning plumbing (one-time, required for addUser.sh)
 
@@ -90,18 +90,18 @@ the GPU-side provisioning commands must run without an interactive password:
 
 ```bash
 # [LOGIN] give root an SSH key
-sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519 -C iit-gpu-provisioning
+sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519 -C slurm-deck-provisioning
 sudo cat /root/.ssh/id_ed25519.pub        # copy this
 
 # [GPU-HOST] authorize it for the GPU_HOST_SSH user (e.g. root-daham)
 #   append the pubkey to ~root-daham/.ssh/authorized_keys (0600)
 # [GPU-HOST] scoped passwordless sudo so adduser/deluser work non-interactively:
-sudo tee /etc/sudoers.d/iit-gpu-provisioning >/dev/null <<'SUDO'
+sudo tee /etc/sudoers.d/slurm-deck-provisioning >/dev/null <<'SUDO'
 root-daham ALL=(root) NOPASSWD: /usr/sbin/useradd, /usr/sbin/userdel, \
     /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/sbin/usermod, \
     /bin/mkdir, /bin/chown, /bin/chmod
 SUDO
-sudo chmod 0440 /etc/sudoers.d/iit-gpu-provisioning && sudo visudo -c -f /etc/sudoers.d/iit-gpu-provisioning
+sudo chmod 0440 /etc/sudoers.d/slurm-deck-provisioning && sudo visudo -c -f /etc/sudoers.d/slurm-deck-provisioning
 ```
 Verify: `sudo ssh root-daham@<gpu-host> 'sudo -n groupadd -g 59999 _t && sudo -n groupdel _t && echo ok'`.
 
@@ -109,7 +109,7 @@ Verify: `sudo ssh root-daham@<gpu-host> 'sudo -n groupadd -g 59999 _t && sudo -n
 ```bash
 # [LOGIN] (GPU host must allow the SSH target passwordless sudo, or run the
 # GPU-host useradd lines manually — see the script's step 3).
-sudo IIT_SITE_ENV=/opt/iit-gpu/deploy/site.env iit-gpu-adduser alice
+sudo SD_SITE_ENV=/opt/slurm-deck/deploy/site.env slurm-deck-adduser alice
 sudo passwd alice           # or install ~alice/.ssh/authorized_keys
 # alice now lands in the TUI on next SSH login (gpuusers triggers ForceCommand).
 ```
@@ -120,16 +120,16 @@ provisioned this way and verified: `sacct -X --format=JobID,User` shows
 `User=tuser`.
 
 ### 1.1 CUTOVER ORDER (do not break `public`)
-The production `/opt/iit-gpu` must be running the per-user code BEFORE the flag
+The production `/opt/slurm-deck` must be running the per-user code BEFORE the flag
 flip / sudoers reduction, or `public`'s `sudo -u daham` path breaks. Sequence:
 ```
 1. Merge feature/phase1-identity → main (maintainer).
-2. cd /opt/iit-gpu && git pull --ff-only && python3 -m pytest tests/ -q
-3. Set GATEWAY_SHARED_USER=0 in /opt/iit-gpu/deploy/site.env
+2. cd /opt/slurm-deck && git pull --ff-only && python3 -m pytest tests/ -q
+3. Set GATEWAY_SHARED_USER=0 in /opt/slurm-deck/deploy/site.env
    (public has a SLURM association, so it keeps working — now as itself).
 4. Swap the sudoers rule to the admin-only scope:
-     sudo cp /opt/iit-gpu/deploy/sudoers-gateway-admin /etc/sudoers.d/iit-gpu-gateway
-     sudo visudo -c -f /etc/sudoers.d/iit-gpu-gateway
+     sudo cp /opt/slurm-deck/deploy/sudoers-gateway-admin /etc/sudoers.d/slurm-deck-gateway
+     sudo visudo -c -f /etc/sudoers.d/slurm-deck-gateway
    (edit %gpuadmins to match your ADMIN_GROUP).
 5. Verify: public and a provisioned user each submit a job; sacct shows their
    own usernames. Rollback = set GATEWAY_SHARED_USER=1 and restore the old

@@ -3,10 +3,10 @@ import re
 
 from rich.console import Console
 
-from iitgpu.launchspec import default_spec
-from iitgpu.review import render_hub, run_hub
-from iitgpu.slurm import NodeStats
-from iitgpu.ui import BACK
+from slurmdeck.launchspec import default_spec
+from slurmdeck.review import render_hub, run_hub
+from slurmdeck.slurm import NodeStats
+from slurmdeck.ui import BACK
 
 
 def _stats(free=3):
@@ -42,8 +42,8 @@ def test_hub_states_vram_is_shared_and_not_enforced():
 
 
 def test_hub_shows_gpu_share_note():
-    from iitgpu.jobs import gpu_share_note
-    from iitgpu.pods import pod_count
+    from slurmdeck.jobs import gpu_share_note
+    from slurmdeck.pods import pod_count
     stats = _stats(3)
     ls = default_spec("batch", stats)
     out = _plain(render_hub(ls, stats))
@@ -74,7 +74,7 @@ def test_hub_availability_unknown_degrades():
 def test_edit_pods_refuses_to_offer_a_menu_it_cannot_size(monkeypatch):
     """I1: with no live stats the stepper offered exactly one row, labelled
     "1 pod — whole GPU". Nothing honest can be offered, so nothing is."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     def _never(*a, **kw):
         raise AssertionError("no pod menu may be shown when the pod count is unknown")
@@ -87,7 +87,7 @@ def test_edit_pods_refuses_to_offer_a_menu_it_cannot_size(monkeypatch):
 
 
 def test_run_hub_launch_and_cancel(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     class _Ask:
         def __init__(self, answers): self.answers = list(answers)
@@ -114,8 +114,8 @@ def test_run_hub_pod_editor_applies_choice(monkeypatch):
     The stepper offers one row per available pod (1..n); picking the last row
     (n pods == the whole GPU) must resize gpu_shards/cpus/mem_gb to exactly
     what resources_for(n, stats) derives."""
-    import iitgpu.review as R
-    from iitgpu.pods import pod_count, resources_for
+    import slurmdeck.review as R
+    from slurmdeck.pods import pod_count, resources_for
 
     stats = _stats(3)
     n = pod_count(stats)
@@ -159,7 +159,7 @@ class _Fixed:
 
 
 def test_edit_time_custom_rejects_minutes_over_59(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     before = ls.time_limit
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
@@ -169,7 +169,7 @@ def test_edit_time_custom_rejects_minutes_over_59(monkeypatch):
 
 
 def test_edit_time_custom_rejects_zero_duration(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     before = ls.time_limit
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
@@ -179,7 +179,7 @@ def test_edit_time_custom_rejects_zero_duration(monkeypatch):
 
 
 def test_edit_time_custom_rejects_over_cluster_max(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     before = ls.time_limit
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
@@ -189,7 +189,7 @@ def test_edit_time_custom_rejects_over_cluster_max(monkeypatch):
 
 
 def test_edit_time_custom_accepts_valid_value(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("03:30"))
@@ -200,7 +200,7 @@ def test_edit_time_custom_accepts_valid_value(monkeypatch):
 def test_edit_env_handles_permission_error_on_iterdir(monkeypatch):
     """A permission error while listing prebuilt envs must not crash the
     wizard — it should degrade to an empty prebuilt list."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
     from pathlib import Path
 
     monkeypatch.setattr(Path, "is_dir", lambda self: True)
@@ -211,7 +211,7 @@ def test_edit_env_handles_permission_error_on_iterdir(monkeypatch):
 
 
 def test_run_hub_refuses_launch_without_script(monkeypatch, capsys):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     class _Ask:
         def __init__(self, answers): self.answers = list(answers)
@@ -254,8 +254,8 @@ def test_deps_option_offered_for_a_notebook_submitted_as_a_batch_job(monkeypatch
     """A .ipynb batch job installs its deps before the first cell runs, exactly
     as a JupyterLab session does. Gating the option on intent alone made it
     unreachable for the one flow that renders a pip-install block."""
-    import iitgpu.review as R
-    from iitgpu.launchspec import default_spec
+    import slurmdeck.review as R
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     ls.script = "/shared/users/u/analysis.ipynb"
@@ -266,8 +266,8 @@ def test_deps_option_offered_for_a_notebook_submitted_as_a_batch_job(monkeypatch
 
 
 def test_deps_option_hidden_for_a_plain_script(monkeypatch):
-    import iitgpu.review as R
-    from iitgpu.launchspec import default_spec
+    import slurmdeck.review as R
+    from slurmdeck.launchspec import default_spec
 
     ls = default_spec("batch")
     ls.script = "/shared/users/u/train.py"
@@ -278,8 +278,8 @@ def test_deps_option_hidden_for_a_plain_script(monkeypatch):
 
 
 def test_deps_option_offered_for_a_jupyterlab_session(monkeypatch):
-    import iitgpu.review as R
-    from iitgpu.launchspec import default_spec
+    import slurmdeck.review as R
+    from slurmdeck.launchspec import default_spec
 
     seen = _captured_choices(monkeypatch, "Data / model")
     R._edit_data_model(default_spec("notebook"), None, lambda: None, lambda: ("", ""))
@@ -290,8 +290,8 @@ def test_deps_option_offered_for_a_jupyterlab_session(monkeypatch):
 def test_hub_hides_script_and_args_for_non_batch_intents(monkeypatch):
     """A JupyterLab session and a shell have no command line, so a script or an
     argument row would be a setting that silently does nothing."""
-    import iitgpu.review as R
-    from iitgpu.launchspec import default_spec
+    import slurmdeck.review as R
+    from slurmdeck.launchspec import default_spec
 
     seen = _captured_choices(monkeypatch, "Select:")
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -304,8 +304,8 @@ def test_hub_hides_script_and_args_for_non_batch_intents(monkeypatch):
 
 
 def test_hub_keeps_script_and_args_for_a_batch_job(monkeypatch):
-    import iitgpu.review as R
-    from iitgpu.launchspec import default_spec
+    import slurmdeck.review as R
+    from slurmdeck.launchspec import default_spec
 
     seen = _captured_choices(monkeypatch, "Select:")
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -320,7 +320,7 @@ def test_hub_keeps_script_and_args_for_a_batch_job(monkeypatch):
 
 def test_hub_omits_the_args_row_for_a_session():
     """And the summary panel agrees with the menu."""
-    from iitgpu.launchspec import default_spec
+    from slurmdeck.launchspec import default_spec
 
     assert "Args" not in _plain(render_hub(default_spec("notebook"), None))
     batch = default_spec("batch")
@@ -342,8 +342,8 @@ def test_hub_vram_share_scales_with_the_requested_shards():
     """I1: the line used to read "about 8 GB of 32" for every job, so a
     Whole-GPU launch was told it owned the card and got an eighth of it in the
     same panel. The number now comes from the live reading and the pod count."""
-    from iitgpu.launchspec import apply_pods, default_spec
-    from iitgpu.pods import pod_count
+    from slurmdeck.launchspec import apply_pods, default_spec
+    from slurmdeck.pods import pod_count
 
     live = _live_stats()
     one = default_spec("batch")            # 1 pod, the default
@@ -371,7 +371,7 @@ def test_hub_vram_line_claims_no_number_without_live_stats():
 def test_edit_time_rejects_eight_thirty(monkeypatch):
     """I5: 8:30 is 500 minutes. The old hours>8 check let it through and the
     QOS (MaxWallDurationPerJob=08:00:00, DenyOnLimit) rejected it at sbatch."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     before = ls.time_limit
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
@@ -381,7 +381,7 @@ def test_edit_time_rejects_eight_thirty(monkeypatch):
 
 
 def test_edit_time_accepts_exactly_the_cluster_maximum(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("8:00"))
@@ -390,7 +390,7 @@ def test_edit_time_accepts_exactly_the_cluster_maximum(monkeypatch):
 
 
 def test_edit_time_accepts_just_under_the_maximum(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("custom (HH:MM)"))
     monkeypatch.setattr(R.questionary, "text", _Fixed("7:59"))
@@ -403,7 +403,7 @@ def test_hub_hides_every_no_op_row_for_a_shell(monkeypatch):
     nothing else, so environment, data/model and the whole Advanced menu were
     fully-functional-looking rows the submit path threw away. Spec §1: a shell
     is size + time."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     seen = _captured_choices(monkeypatch, "Select:")
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -426,7 +426,7 @@ def test_hub_hides_data_model_for_a_session_but_keeps_env_and_packages(monkeypat
     """I3: render_notebook_sbatch() never emits data_path/model_path, but it does
     consume the environment and the pip-install block — so those stay, and the
     packages question gets its own row instead of hiding behind Data / model."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     seen = _captured_choices(monkeypatch, "Select:")
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -444,7 +444,7 @@ def test_hub_hides_data_model_for_a_session_but_keeps_env_and_packages(monkeypat
 
 
 def test_hub_keeps_every_row_for_a_batch_job(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     seen = _captured_choices(monkeypatch, "Select:")
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -457,7 +457,7 @@ def test_hub_keeps_every_row_for_a_batch_job(monkeypatch):
 
 def test_advanced_hides_array_and_dependency_for_a_session(monkeypatch):
     """I3: neither directive is rendered for a notebook job."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     seen = _captured_choices(monkeypatch, "Advanced:")
     R._edit_advanced(default_spec("notebook"))
@@ -467,7 +467,7 @@ def test_advanced_hides_array_and_dependency_for_a_session(monkeypatch):
 
 
 def test_advanced_keeps_array_and_dependency_for_a_batch_job(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     seen = _captured_choices(monkeypatch, "Advanced:")
     R._edit_advanced(default_spec("batch"))
@@ -477,7 +477,7 @@ def test_advanced_keeps_array_and_dependency_for_a_batch_job(monkeypatch):
 
 def test_view_generated_sbatch_prints_the_script(monkeypatch, capsys):
     """I4: the menu item used to print a promise and show nothing."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     answers = ["view generated sbatch", BACK]
 
@@ -492,7 +492,7 @@ def test_view_generated_sbatch_prints_the_script(monkeypatch, capsys):
 
 
 def test_view_generated_sbatch_without_a_preview_says_so(monkeypatch, capsys):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     answers = ["view generated sbatch", BACK]
 
@@ -508,7 +508,7 @@ def test_view_generated_sbatch_without_a_preview_says_so(monkeypatch, capsys):
 
 def test_run_hub_passes_the_preview_through_to_advanced(monkeypatch):
     """The callback must actually reach _edit_advanced — the wiring, not the menu."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     got = {}
     monkeypatch.setattr(R, "get_node_stats", lambda *a, **kw: None)
@@ -529,7 +529,7 @@ def test_run_hub_passes_the_preview_through_to_advanced(monkeypatch):
 
 def test_model_path_outside_the_jail_is_rejected(monkeypatch, capsys):
     """M1: the model path is exported verbatim into the job script."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
     ls.model_path = "/shared/models/keepme"
@@ -541,7 +541,7 @@ def test_model_path_outside_the_jail_is_rejected(monkeypatch, capsys):
 
 
 def test_model_path_inside_the_jail_is_accepted(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: enter a path or HF repo id"))
@@ -552,7 +552,7 @@ def test_model_path_inside_the_jail_is_accepted(monkeypatch):
 
 def test_model_path_accepts_a_hugging_face_repo_id(monkeypatch):
     """Not a path, so the jail does not apply — same as the old wizard."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: enter a path or HF repo id"))
@@ -564,33 +564,33 @@ def test_model_path_accepts_a_hugging_face_repo_id(monkeypatch):
 def test_model_registry_pick_sets_the_model_path(monkeypatch):
     """The registry option restores what the old wizard's option (a) did:
     pick an already-downloaded model without retyping its path."""
-    import iitgpu.review as R
-    from iitgpu.models import ModelEntry
+    import slurmdeck.review as R
+    from slurmdeck.models import ModelEntry
 
     ls = default_spec("batch")
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: pick from registry"))
     entry = ModelEntry(name="llama", source="huggingface",
                        path="/shared/models/llama", added_at="2026-01-01",
                        added_by="u", size_mb=1.0)
-    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: entry)
+    monkeypatch.setattr("slurmdeck.models.pick_model", lambda cfg: entry)
     R._edit_data_model(ls, object(), lambda: None, None)
     assert ls.model_path == "/shared/models/llama"
 
 
 def test_model_registry_pick_cancelled_leaves_model_path_unchanged(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
     ls.model_path = "/shared/models/keepme"
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: pick from registry"))
-    monkeypatch.setattr("iitgpu.models.pick_model", lambda cfg: None)
+    monkeypatch.setattr("slurmdeck.models.pick_model", lambda cfg: None)
     R._edit_data_model(ls, object(), lambda: None, None)
     assert ls.model_path == "/shared/models/keepme"
 
 
 def test_model_hf_download_sets_the_model_path_on_success(monkeypatch):
     """Restores the old wizard's option (b): download from HuggingFace inline."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
 
@@ -599,14 +599,14 @@ def test_model_hf_download_sets_the_model_path_on_success(monkeypatch):
 
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: download from HuggingFace"))
     monkeypatch.setattr(R.questionary, "text", _text)
-    monkeypatch.setattr("iitgpu.models.download_hf",
+    monkeypatch.setattr("slurmdeck.models.download_hf",
                         lambda cfg, repo_id: (True, "/shared/models/Mistral-7B-v0.1"))
     R._edit_data_model(ls, object(), lambda: None, None)
     assert ls.model_path == "/shared/models/Mistral-7B-v0.1"
 
 
 def test_model_hf_download_failure_leaves_model_path_unchanged(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
 
     ls = default_spec("batch")
     ls.model_path = "/shared/models/keepme"
@@ -616,14 +616,14 @@ def test_model_hf_download_failure_leaves_model_path_unchanged(monkeypatch):
 
     monkeypatch.setattr(R.questionary, "select", _Fixed("model: download from HuggingFace"))
     monkeypatch.setattr(R.questionary, "text", _text)
-    monkeypatch.setattr("iitgpu.models.download_hf", lambda cfg, repo_id: (False, ""))
+    monkeypatch.setattr("slurmdeck.models.download_hf", lambda cfg, repo_id: (False, ""))
     R._edit_data_model(ls, object(), lambda: None, None)
     assert ls.model_path == "/shared/models/keepme"
 
 
 def test_container_image_must_be_a_jailed_sif(monkeypatch, capsys):
     """M1: the image path lands unquoted in the apptainer exec line."""
-    import iitgpu.review as R
+    import slurmdeck.review as R
     from pathlib import Path
 
     monkeypatch.setattr(Path, "is_dir", lambda self: False)   # no prebuilt envs
@@ -639,7 +639,7 @@ def test_container_image_must_be_a_jailed_sif(monkeypatch, capsys):
 
 
 def test_container_image_valid_sif_is_accepted(monkeypatch):
-    import iitgpu.review as R
+    import slurmdeck.review as R
     from pathlib import Path
 
     monkeypatch.setattr(Path, "is_dir", lambda self: False)

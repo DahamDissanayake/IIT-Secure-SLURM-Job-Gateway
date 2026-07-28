@@ -1,13 +1,13 @@
 from rich.panel import Panel
 from rich.table import Table
 
-from iitgpu import ui
+from slurmdeck import ui
 
 
 def test_style_is_one_shared_object():
     assert ui.STYLE is not None
     # Same object every import — not re-built per module.
-    from iitgpu.ui import STYLE as style_again
+    from slurmdeck.ui import STYLE as style_again
     assert ui.STYLE is style_again
 
 

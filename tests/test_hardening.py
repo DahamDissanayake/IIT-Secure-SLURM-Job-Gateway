@@ -1,6 +1,7 @@
 # tests/test_hardening.py
 """Tests for Phase 7 hardening — job dir permissions, UPGRADE-RUNBOOK.md."""
 import grp
+import re
 import stat
 from pathlib import Path
 import pytest
@@ -19,7 +20,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
     see the comment on make_job_folder).
 
     Production's /shared behaves the same way: jobs/<user> is provisioned
-    2770 owner:gpuadmins by iit-gpu-adduser.sh, and a folder mkdir'd inside
+    2770 owner:gpuadmins by slurm-deck-adduser.sh, and a folder mkdir'd inside
     it (via the raw os.mkdir syscall, which is what Path.mkdir uses) comes
     out 2770 too, with files written inside it inheriting group gpuadmins.
     (An earlier version of this docstring claimed production /shared does
@@ -28,7 +29,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
     parent directories. Re-checked against the raw syscall, setgid inherits
     fine. On this host, verify mode-bit behaviour with `python3 -c "import
     os; os.mkdir(...)"`, not with coreutils binaries.) The gpuadmins ACL
-    applied by deploy/fix-shared-perms.sh and deploy/iit-gpu-adduser.sh is a
+    applied by deploy/fix-shared-perms.sh and deploy/slurm-deck-adduser.sh is a
     second, independent layer on top of this, and is what
     deploy/check-shared-perms.sh verifies -- useful because mode bits alone
     can look correct while an ACL entry disagrees.
@@ -36,7 +37,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
     This test pins make_job_folder's own behaviour -- given a setgid
     parent, it does not chmod the setgid bit away -- which also matches
     what production job folders actually end up with."""
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
 
     user_dir = tmp_path / "sec_test"
     user_dir.mkdir()
@@ -63,7 +64,7 @@ def test_make_job_folder_uses_0o2770(tmp_path):
 
 
 def test_make_job_folder_no_world_readable(tmp_path):
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
 
     spec = JobSpec(
         job_name="sec_test2",
@@ -127,7 +128,7 @@ def test_make_job_folder_chowns_to_gpuusers(tmp_path):
     the test runner is a member of gpuusers (it usually is not in CI).
     """
     from unittest.mock import patch, MagicMock
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
 
     spec = JobSpec(
         job_name="chown_test",
@@ -142,7 +143,7 @@ def test_make_job_folder_chowns_to_gpuusers(tmp_path):
     fake_gid = 1500
     chown_calls = []
 
-    with patch("iitgpu.jobs.grp") as mock_grp,          patch("iitgpu.jobs.os.chown", side_effect=lambda *a: chown_calls.append(a)):
+    with patch("slurmdeck.jobs.grp") as mock_grp,          patch("slurmdeck.jobs.os.chown", side_effect=lambda *a: chown_calls.append(a)):
         mock_grp.getgrnam.return_value = MagicMock(gr_gid=fake_gid)
         folder = make_job_folder(str(tmp_path), spec)
 
@@ -169,7 +170,7 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
     actually proves is that make_job_folder never strips or downgrades a
     folder's existing mode just because os.chown failed."""
     from unittest.mock import patch
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
 
     user_dir = tmp_path / "chown_fail"
     user_dir.mkdir()
@@ -186,7 +187,7 @@ def test_make_job_folder_chown_failure_does_not_raise(tmp_path):
         user="chown_fail",
     )
 
-    with patch("iitgpu.jobs.os.chown", side_effect=PermissionError("not in group")):
+    with patch("slurmdeck.jobs.os.chown", side_effect=PermissionError("not in group")):
         folder = make_job_folder(str(tmp_path), spec)
 
     assert Path(folder).is_dir(), "folder must be created even if chown fails"
@@ -202,7 +203,7 @@ def test_make_job_folder_no_setgid_parent_still_gets_safe_permissions(tmp_path):
     chmod() cannot grant it to a non-privileged, non-group-member caller. The
     degraded result must still be safe (owner+group only, no world access),
     just without the setgid bit."""
-    from iitgpu.jobs import JobSpec, make_job_folder
+    from slurmdeck.jobs import JobSpec, make_job_folder
 
     spec = JobSpec(
         job_name="no_setgid_parent",
@@ -223,13 +224,13 @@ def test_make_job_folder_no_setgid_parent_still_gets_safe_permissions(tmp_path):
 
 # ── Gateway ForceCommand wrapper ──────────────────────────────────────────────
 
-GATEWAY_SCRIPT = REPO_ROOT / "deploy" / "iit-gpu-gateway"
+GATEWAY_SCRIPT = REPO_ROOT / "deploy" / "slurm-deck-gateway"
 SSHD_CONF      = REPO_ROOT / "deploy" / "sshd-gateway.conf"
 INSTALL_SH     = REPO_ROOT / "deploy" / "install.sh"
 
 
 def test_gateway_wrapper_exists():
-    assert GATEWAY_SCRIPT.exists(), "deploy/iit-gpu-gateway is missing"
+    assert GATEWAY_SCRIPT.exists(), "deploy/slurm-deck-gateway is missing"
 
 
 def test_gateway_wrapper_is_bash_script():
@@ -255,7 +256,7 @@ def test_gateway_wrapper_has_jail_check():
 
 def test_gateway_wrapper_falls_through_to_manager():
     text = GATEWAY_SCRIPT.read_text()
-    assert "iit-gpu-manager" in text, "wrapper must exec iit-gpu-manager for interactive sessions"
+    assert "slurm-deck" in text, "wrapper must exec slurm-deck for interactive sessions"
 
 
 def test_gateway_wrapper_rejects_shell_metacharacters():
@@ -272,24 +273,24 @@ def test_gateway_wrapper_rejects_path_traversal():
 def test_gateway_wrapper_has_nfs_root_placeholder():
     text = GATEWAY_SCRIPT.read_text()
     assert "__NFS_ROOT__" in text, (
-        "deploy/iit-gpu-gateway must contain __NFS_ROOT__ placeholder "
+        "deploy/slurm-deck-gateway must contain __NFS_ROOT__ placeholder "
         "so install.sh substitutes the real path at install time"
     )
 
 
 def test_sshd_conf_uses_gateway_wrapper_not_manager_directly():
     text = SSHD_CONF.read_text()
-    assert "ForceCommand /usr/local/bin/iit-gpu-gateway" in text, (
-        "sshd-gateway.conf must use iit-gpu-gateway as ForceCommand"
+    assert "ForceCommand /usr/local/bin/slurm-deck-gateway" in text, (
+        "sshd-gateway.conf must use slurm-deck-gateway as ForceCommand"
     )
-    assert "ForceCommand /usr/local/bin/iit-gpu-manager" not in text, (
-        "ForceCommand must point to the gateway wrapper, not directly to iit-gpu-manager"
+    assert re.search(r"ForceCommand /usr/local/bin/slurm-deck(?!-gateway)\b", text) is None, (
+        "ForceCommand must point to the gateway wrapper, not directly to slurm-deck"
     )
 
 
 def test_install_sh_installs_gateway_wrapper():
     text = INSTALL_SH.read_text()
-    assert "iit-gpu-gateway" in text, "install.sh must install the gateway wrapper"
+    assert "slurm-deck-gateway" in text, "install.sh must install the gateway wrapper"
 
 
 def test_install_sh_substitutes_nfs_root_in_wrapper():

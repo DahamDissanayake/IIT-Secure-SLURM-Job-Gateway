@@ -3,14 +3,14 @@
 #
 # This machine has no git. All git/deploy work runs on the login node
 # (192.168.122.10) via SSH. This script:
-#   1. Triggers the login-node deploy (git pull → tests → /opt/iit-gpu → service restart)
-#   2. Ensures the iit-gpu-stats systemd service is active on this host
+#   1. Triggers the login-node deploy (git pull → tests → /opt/slurm-deck → service restart)
+#   2. Ensures the slurm-deck-stats systemd service is active on this host
 set -euo pipefail
 
 LOGIN="slurmadmin@192.168.122.10"
 STATS_JSON="/shared/.gpu_stats.json"
-WRITER_DEST="/usr/local/bin/iit-gpu-stats-writer"
-SERVICE_SRC="/tmp/iit-gpu-stats.service"   # synced from login node via SSH before this script
+WRITER_DEST="/usr/local/bin/slurm-deck-stats-writer"
+SERVICE_SRC="/tmp/slurm-deck-stats.service"   # synced from login node via SSH before this script
 
 ok()   { echo "  ✔  $*"; }
 warn() { echo "  ⚠  $*"; }
@@ -19,22 +19,22 @@ step() { echo; echo "==> $*"; }
 
 # ── 1. Deploy on login node ───────────────────────────────────────────────────
 step "Running deploy on login node (192.168.122.10)..."
-ssh "$LOGIN" "bash /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/redeploy-igm.sh" \
+ssh "$LOGIN" "bash /home/slurmadmin/slurm-deck/deploy/redeploy-slurm-deck.sh" \
     || fail "Login-node deploy failed"
 
 # ── 2. Sync service files from login node ────────────────────────────────────
 step "Syncing stats writer from login node..."
-scp "$LOGIN:/home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/iit-gpu-stats-writer" \
+scp "$LOGIN:/home/slurmadmin/slurm-deck/deploy/slurm-deck-stats-writer" \
     "$WRITER_DEST"
 chmod +x "$WRITER_DEST"
 
-scp "$LOGIN:/home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/iit-gpu-stats.service" \
-    /etc/systemd/system/iit-gpu-stats.service
+scp "$LOGIN:/home/slurmadmin/slurm-deck/deploy/slurm-deck-stats.service" \
+    /etc/systemd/system/slurm-deck-stats.service
 
 ok "Files synced"
 
 # ── 3. Install / reload systemd service ──────────────────────────────────────
-step "Installing iit-gpu-stats systemd service..."
+step "Installing slurm-deck-stats systemd service..."
 
 # [GPU-HOST] these commands require root — emit as labeled block if not root
 if [ "$(id -u)" -ne 0 ]; then
@@ -42,20 +42,20 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "  ┌─────────────────────────────────────────────────────────────────┐"
     echo "  │  [GPU-HOST] run manually as root to install/restart service:    │"
     echo "  │    sudo systemctl daemon-reload                                  │"
-    echo "  │    sudo systemctl enable --now iit-gpu-stats                    │"
-    echo "  │    sudo systemctl status iit-gpu-stats                          │"
+    echo "  │    sudo systemctl enable --now slurm-deck-stats                    │"
+    echo "  │    sudo systemctl status slurm-deck-stats                          │"
     echo "  └─────────────────────────────────────────────────────────────────┘"
     echo
     warn "Run the above as root to activate the systemd service."
 else
     systemctl daemon-reload
-    systemctl enable iit-gpu-stats
-    systemctl restart iit-gpu-stats
+    systemctl enable slurm-deck-stats
+    systemctl restart slurm-deck-stats
     sleep 3
-    if systemctl is-active --quiet iit-gpu-stats; then
-        ok "iit-gpu-stats is active ($(systemctl show iit-gpu-stats --property=MainPID --value))"
+    if systemctl is-active --quiet slurm-deck-stats; then
+        ok "slurm-deck-stats is active ($(systemctl show slurm-deck-stats --property=MainPID --value))"
     else
-        warn "Service not active — check: journalctl -u iit-gpu-stats -n 30"
+        warn "Service not active — check: journalctl -u slurm-deck-stats -n 30"
     fi
 fi
 

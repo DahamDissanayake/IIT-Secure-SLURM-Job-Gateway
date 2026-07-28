@@ -15,15 +15,15 @@ considered compromised.
 
 ```bash
 # 1. Go to https://resend.com/api-keys
-#    Delete the old key: re_Fx3dzHkn_MGK594BR8LxsQWBqt8PSYfj7
+#    Delete the old key: re_Fx3dzHkn_… (redacted; already rotated per this runbook)
 
 # 2. Create a new key with the same sending domain permissions.
 
 # 3. Add it to site.env on the login node (not in source):
-echo 'RESEND_API_KEY=re_YOUR_NEW_KEY_HERE' >> /opt/iit-gpu/deploy/site.env
+echo 'RESEND_API_KEY=re_YOUR_NEW_KEY_HERE' >> /opt/slurm-deck/deploy/site.env
 
 # 4. Restart the audit daemon so mailer.py picks up the new key:
-sudo systemctl restart iit-gpu-audit
+sudo systemctl restart slurm-deck-audit
 ```
 
 ### [LOGIN] Rotate the GitHub token
@@ -38,8 +38,8 @@ filter-repo output (it was embedded in the remote URL). Treat as compromised.
 # 2. Create a new fine-grained token with repo write access.
 
 # 3. Update the remote URL on the login node:
-git -C /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway remote set-url origin \
-  https://DahamDissanayake:NEW_TOKEN_HERE@github.com/DahamDissanayake/IIT-Secure-SLURM-Job-Gateway.git
+git -C /home/slurmadmin/slurm-deck remote set-url origin \
+  https://DahamDissanayake:NEW_TOKEN_HERE@github.com/DahamDissanayake/slurm-deck.git
 ```
 
 ### [LOGIN] Restart audit daemon after deploy
@@ -49,15 +49,15 @@ daemon picks this up automatically at startup via the `ALTER TABLE … ADD COLUM
 migration, but only after a restart.
 
 ```bash
-sudo systemctl restart iit-gpu-audit
+sudo systemctl restart slurm-deck-audit
 # Verify:
-sudo systemctl show iit-gpu-audit --property=ExecMainStartTimestamp,ActiveState
+sudo systemctl show slurm-deck-audit --property=ExecMainStartTimestamp,ActiveState
 ```
 
 ### [LOGIN] Optional — system-level password expiry enforcement
 
 The Phase 1 implementation uses a TUI-level `must_change_pw` flag in `users.db`.
-This is enforced when users enter via `iit-gpu-manager` (ForceCommand). It does
+This is enforced when users enter via `slurm-deck` (ForceCommand). It does
 not prevent a user from bypassing the TUI via sftp or scp.
 
 To add a system-level `chage -d 0` enforcement (forces PAM to require a password
@@ -104,14 +104,14 @@ entirely — the user cannot connect at all, not even to change it.
 
 Three post-deploy bug fixes. Only the first needs a **manual step** (a group
 change + `slurmctld` restart); the other two are code-only and ship with the
-normal `redeploy-igm.sh`.
+normal `redeploy-slurm-deck.sh`.
 
 ### [LOGIN] Job-status email never delivered — add `slurm` to `gpusync` (REQUIRED)
 
 **Symptom:** login/welcome mail worked, but SLURM job notices (BEGIN/END/FAIL)
 were never received.
 
-**Root cause:** `slurmctld` runs `MailProg` (`/usr/local/bin/iit-gpu-mailer`) as
+**Root cause:** `slurmctld` runs `MailProg` (`/usr/local/bin/slurm-deck-mailer`) as
 **`SlurmUser` = `slurm`**, *not* root. `slurm` was only in `slurm,gpuusers`, so
 it could **not** read the Resend key in `secrets.env` (`0640 root:gpusync`). The
 mailer then fell back to msmtp, which also failed twice: `slurm` cannot read
@@ -119,8 +119,8 @@ mailer then fell back to msmtp, which also failed twice: `slurm` cannot read
 (`-s` is a mailx/sendmail option msmtp rejects: `invalid option -- 's'`). Both
 paths failed silently.
 
-`deploy/install.sh` and `deploy/redeploy-igm.sh` now add the membership
-automatically, and `redeploy-igm.sh` restarts `slurmctld` only when it actually
+`deploy/install.sh` and `deploy/redeploy-slurm-deck.sh` now add the membership
+automatically, and `redeploy-slurm-deck.sh` restarts `slurmctld` only when it actually
 adds it. On a host that pre-dates this change, apply it once by hand:
 
 ```bash
@@ -142,7 +142,7 @@ systemctl is-active slurmctld
 sudo scontrol setdebug debug2
 sbatch --wrap 'hostname; sleep 2' \
   --partition=gpu --mail-user=you@example.com --mail-type=BEGIN,END
-# Watch for: MailProg output was 'iit-gpu-mailer: sent to … — HTTP 200'
+# Watch for: MailProg output was 'slurm-deck-mailer: sent to … — HTTP 200'
 sudo journalctl -u slurmctld --since '-1 min' | grep -i 'mail\|MailProg'
 sudo scontrol setdebug info
 ```
@@ -151,18 +151,18 @@ sudo scontrol setdebug info
 > must be readable by the `slurm` user. The mailer's old "runs as root" comment
 > was wrong and has been corrected.
 
-> **NOTE:** `redeploy-igm.sh` re-execs from a pre-pull temp copy of itself, so a
+> **NOTE:** `redeploy-slurm-deck.sh` re-execs from a pre-pull temp copy of itself, so a
 > brand-new block added to that script first runs on the *next* deploy. The live
 > `slurm`-in-`gpusync` membership above persists regardless.
 
 ### Code-only (no manual step) — file-picker scoping
 
-- **Job wizard data/script picker (`iitgpu/wizard.py`):** `_browse_data_folder`
+- **Job wizard data/script picker (`slurmdeck/wizard.py`):** `_browse_data_folder`
   / `_browse_script` now take a `jail` predicate and the wizard opens regular
   users in their own `shared/users/<user>` area (admins keep the full NFS jail),
   instead of starting at `/shared` and falling back there when the user dir was
   missing.
-- **"Upload data" picker (`iitgpu/upload.py` `run_upload`):** always scopes to
+- **"Upload data" picker (`slurmdeck/upload.py` `run_upload`):** always scopes to
   the user's own `shared/users/<username>` folder for **everyone, admins
   included** (it no longer lists every top-level `/shared` dir, where selecting a
   non-writable parent like `/shared/users` failed with "Could not create or
@@ -171,7 +171,7 @@ sudo scontrol setdebug info
 Picked up by the normal redeploy:
 
 ```bash
-bash /opt/iit-gpu/deploy/redeploy-igm.sh
+bash /opt/slurm-deck/deploy/redeploy-slurm-deck.sh
 ```
 
 ---
@@ -184,31 +184,31 @@ The Resend API key must NOT live in site.env (group-readable by all users).
 Move it into secrets.env, readable only by root + gpusync:
 
 ```bash
-sudo cp /opt/iit-gpu/deploy/secrets.env.example /opt/iit-gpu/deploy/secrets.env
-sudoedit /opt/iit-gpu/deploy/secrets.env          # set RESEND_API_KEY=...
-sudo chown root:gpusync /opt/iit-gpu/deploy/secrets.env
-sudo chmod 640 /opt/iit-gpu/deploy/secrets.env
+sudo cp /opt/slurm-deck/deploy/secrets.env.example /opt/slurm-deck/deploy/secrets.env
+sudoedit /opt/slurm-deck/deploy/secrets.env          # set RESEND_API_KEY=...
+sudo chown root:gpusync /opt/slurm-deck/deploy/secrets.env
+sudo chmod 640 /opt/slurm-deck/deploy/secrets.env
 
 # Remove the key from site.env (it is now ignored there):
-sudo sed -i '/^RESEND_API_KEY=/d' /opt/iit-gpu/deploy/site.env
+sudo sed -i '/^RESEND_API_KEY=/d' /opt/slurm-deck/deploy/site.env
 
 # Restart the daemon so it loads the key:
-sudo systemctl restart iit-gpu-audit
+sudo systemctl restart slurm-deck-audit
 
 # Verify a regular user CANNOT read it:
-sudo -u <some_gpuuser> cat /opt/iit-gpu/deploy/secrets.env   # must be Permission denied
+sudo -u <some_gpuuser> cat /opt/slurm-deck/deploy/secrets.env   # must be Permission denied
 ```
 
 ### [LOGIN] Tighten the working-copy site.env (L5)
 
 ```bash
-sudo chmod 600 /home/slurmadmin/IIT-Secure-SLURM-Job-Gateway/deploy/site.env
+sudo chmod 600 /home/slurmadmin/slurm-deck/deploy/site.env
 ```
 
 ### Notes
 - All TUI mail now flows through the daemon's `mail.send` verb; the key never
   enters a user or admin process.
-- The SLURM `iit-gpu-mailer` (MailProg) runs as **`SlurmUser` = `slurm`**, not
+- The SLURM `slurm-deck-mailer` (MailProg) runs as **`SlurmUser` = `slurm`**, not
   root, and reads secrets.env directly — which requires `slurm` to be in the
   `gpusync` group (see "Mail & file-picker fixes" above).
 - `users.admin_emails` is now restricted to admins + root (was world-readable).
