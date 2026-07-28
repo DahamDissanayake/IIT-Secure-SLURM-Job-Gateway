@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ADMIN_GROUP="${ADMIN_GROUP:-gpuadmins}"
-ADMINS="${ADMINS:-slurmadmin dahamadmin indrajith daham}"
+ADMINS="${ADMINS:-slurmadmin dahamadmin indrajith}"
 
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: run as root on the GPU host" >&2; exit 1; }
 getent group "$ADMIN_GROUP" >/dev/null || { echo "ERROR: group $ADMIN_GROUP missing" >&2; exit 1; }
