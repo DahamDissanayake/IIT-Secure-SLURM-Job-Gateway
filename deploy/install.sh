@@ -154,7 +154,7 @@ chmod 0755 "${BIN_PATH}"
 # ── Gateway ForceCommand wrapper (scp/rsync passthrough) ──────────────────────
 echo "==> Installing gateway ForceCommand wrapper at /usr/local/bin/slurm-deck-gateway..."
 GATEWAY_PATH="/usr/local/bin/slurm-deck-gateway"
-sed "s|__NFS_ROOT__||g" "${SCRIPT_DIR}/slurm-deck-gateway" > "${GATEWAY_PATH}"
+sed "s|__NFS_ROOT__|${NFS_ROOT}|g" "${SCRIPT_DIR}/slurm-deck-gateway" > "${GATEWAY_PATH}"
 chmod 0755 "${GATEWAY_PATH}"
 
 # ── systemd service ───────────────────────────────────────────────────────────
