@@ -422,6 +422,33 @@ def _h_users_offboard(payload: dict, peer_uid: int,
     return True, {"username": username}, ""
 
 
+def _h_users_update_email(payload: dict, peer_uid: int,
+                          users_conn: sqlite3.Connection,
+                          audit_conn: sqlite3.Connection):
+    """Update the email on file for an existing ACTIVE user. Admin-only.
+
+    users.create deliberately refuses to touch an already-active user (it's
+    a create/reactivate verb, not an edit), and there was no other path to
+    fix a wrong or missing email on an existing account -- this closes that
+    gap without going through slurm-deck-adduser (re-running adduser on an
+    existing user reassigns a fresh UID, corrupting home-directory ownership;
+    see deploy/slurm-deck-adduser.sh header)."""
+    peer_user = _uid_to_username(peer_uid) or str(peer_uid)
+    username  = payload.get("username", "").strip()
+    email     = payload.get("email", "").strip()
+    if not username or not email:
+        return False, None, "username and email required"
+    cur = users_conn.execute(
+        "UPDATE users SET email=? WHERE username=? AND status='active'",
+        (email, username))
+    users_conn.commit()
+    if cur.rowcount == 0:
+        return False, None, "user not found or not active"
+    _self_audit(audit_conn, peer_user, "admin_update_user_email",
+                detail=username, meta={"email": email})
+    return True, {"username": username, "email": email}, ""
+
+
 def _h_users_reconcile(users_conn: sqlite3.Connection):
     import grp
     gpuusers = os.environ.get("GPUUSERS_GROUP", "gpuusers")
@@ -674,8 +701,8 @@ def _h_service_status(payload: dict, peer_uid: int,
 
 _ADMIN_VERBS = frozenset({
     "users.create", "users.get", "users.list", "users.offboard",
-    "users.reconcile", "audit.query", "roster.view", "maillog.tail",
-    "joblog.read", "service.status",
+    "users.update_email", "users.reconcile", "audit.query", "roster.view",
+    "maillog.tail", "joblog.read", "service.status",
 })
 
 
@@ -722,6 +749,8 @@ def _dispatch(verb: str, payload: dict, peer_uid: int | None,
             return _h_users_list(users_conn)
         if verb == "users.offboard":
             return _h_users_offboard(payload, peer_uid, users_conn, audit_conn)
+        if verb == "users.update_email":
+            return _h_users_update_email(payload, peer_uid, users_conn, audit_conn)
         if verb == "users.reconcile":
             return _h_users_reconcile(users_conn)
         if verb == "audit.query":

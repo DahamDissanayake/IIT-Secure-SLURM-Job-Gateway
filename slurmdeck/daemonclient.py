@@ -33,6 +33,13 @@ def create_user(username: str, email: str, role: str,
     return False, resp.get("error", "daemon error")
 
 
+def update_user_email(username: str, email: str) -> tuple[bool, str]:
+    resp = daemon_request("users.update_email", {"username": username, "email": email})
+    if resp.get("ok"):
+        return True, f"email updated for {username}"
+    return False, resp.get("error", "daemon error")
+
+
 def get_user(username: str) -> dict | None:
     resp = daemon_request("users.get", {"username": username})
     return resp.get("data") if resp.get("ok") else None

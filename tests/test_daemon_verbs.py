@@ -119,6 +119,52 @@ def test_create_must_change_pw_defaults_to_zero():
 
 # ── users.admin_emails ────────────────────────────────────────────────────────
 
+# -- users.update_email ---------------------------------------------------
+
+def test_update_email_updates_active_user():
+    d, conn = _users_db()
+    aconn = _audit_db()
+    _insert_user(conn, "daham", status="active", email="")
+    ok, data, err = d._h_users_update_email(
+        {"username": "daham", "email": "daham@iit.ac.lk"}, 9000, conn, aconn,
+    )
+    assert ok, err
+    row = conn.execute("SELECT email FROM users WHERE username='daham'").fetchone()
+    assert row[0] == "daham@iit.ac.lk"
+
+
+def test_update_email_rejects_unknown_user():
+    d, conn = _users_db()
+    aconn = _audit_db()
+    ok, _, err = d._h_users_update_email(
+        {"username": "ghost", "email": "x@iit.lk"}, 9000, conn, aconn,
+    )
+    assert not ok
+    assert "not found" in err
+
+
+def test_update_email_rejects_offboarded_user():
+    d, conn = _users_db()
+    aconn = _audit_db()
+    _insert_user(conn, "alice", status="offboarded")
+    ok, _, err = d._h_users_update_email(
+        {"username": "alice", "email": "x@iit.lk"}, 9000, conn, aconn,
+    )
+    assert not ok
+    assert "not found" in err
+
+
+def test_update_email_requires_both_fields():
+    d, conn = _users_db()
+    aconn = _audit_db()
+    _insert_user(conn, "alice", status="active")
+    ok, _, err = d._h_users_update_email(
+        {"username": "alice", "email": ""}, 9000, conn, aconn,
+    )
+    assert not ok
+    assert "required" in err
+
+
 def test_admin_emails_returns_only_active_admins():
     d, conn = _users_db()
     _insert_user(conn, "admin1", role="admin", status="active",  email="a1@iit.lk")
