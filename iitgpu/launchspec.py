@@ -91,7 +91,7 @@ def availability_line(stats) -> str:
     free = _slices_free(stats)
     if free is None:
         return "GPU availability unknown"
-    return f"GPU now: {free}/{stats.shard_total} slices free"
+    return f"GPU now: {free}/{stats.shard_total} pods free"
 
 
 def pod_availability(k: int, stats) -> str:

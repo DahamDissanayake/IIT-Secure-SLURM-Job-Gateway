@@ -104,17 +104,17 @@ def resource_status_line(stats) -> str:
     mem_free_gb = max(0.0, (stats.mem_total_mb - stats.mem_alloc_mb) / 1024)
     cpu_ram = f"[dim]CPU {cpu_free}/{stats.cpu_total} free · RAM {mem_free_gb:.0f}GB free[/]"
 
-    # The GPU is split into slices (pods), so what matters is how many are
-    # left, not whether the card is "in use" — several jobs share it.
+    # The GPU is split into pods, so what matters is how many are left, not
+    # whether the card is "in use" — several jobs share it.
     if stats.shard_total:
         free = max(0, stats.shard_total - stats.shard_alloc)
         pods = _pod_blocks(free, stats.shard_total)
         color = "green" if free > 0 else "yellow"
-        counts = f"{pods}  [{color}]GPU {free}/{stats.shard_total} slices free[/]  {cpu_ram}"
+        counts = f"{pods}  [{color}]GPU {free}/{stats.shard_total} pods free[/]  {cpu_ram}"
         if free > 0:
             verdict = f"[bold green]OK to submit — room for {free} more GPU job(s)[/]"
         elif cpu_free > 0 and mem_free_gb > 0:
-            verdict = "[bold yellow]All GPU slices busy — CPU-only jobs can still run[/]"
+            verdict = "[bold yellow]All GPU pods busy — CPU-only jobs can still run[/]"
         else:
             verdict = "[bold red]Cluster full — wait for a job to finish[/]"
         return f"{counts}  [dim]·[/]  {verdict}"

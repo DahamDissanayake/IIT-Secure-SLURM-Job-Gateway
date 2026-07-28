@@ -170,7 +170,7 @@ def _build_cluster_panel(stats: NodeStats | None) -> Panel:
             if stats.shard_total:
                 gpu_color = "yellow" if stats.shard_alloc >= stats.shard_total else "green"
                 gpu_str = (f"GPU [bold {gpu_color}]{stats.shard_alloc}/"
-                           f"{stats.shard_total} slices[/]")
+                           f"{stats.shard_total} pods[/]")
             else:
                 gpu_color = "yellow" if stats.gpu_alloc > 0 else "green"
                 gpu_str = f"GPU [bold {gpu_color}]{stats.gpu_alloc}/{stats.gpu_total} alloc[/]"
@@ -437,7 +437,7 @@ def _build_hw_panel(stats: NodeStats | None) -> Panel:
         node_state = stats.state.split("+")[0]
         sc = "green" if "IDLE" in node_state else "yellow" if "ALLOC" in node_state else "red"
         alloc_parts = [
-            f"GPU {stats.shard_alloc}/{stats.shard_total} slices"
+            f"GPU {stats.shard_alloc}/{stats.shard_total} pods"
             if stats.shard_total else f"GPU {stats.gpu_alloc}/{stats.gpu_total}",
             f"CPU {stats.cpu_alloc}/{stats.cpu_total}",
             f"RAM {stats.mem_alloc_mb//1024}/{stats.mem_total_mb//1024} GB",

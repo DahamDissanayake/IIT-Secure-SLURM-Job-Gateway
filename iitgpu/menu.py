@@ -12,18 +12,6 @@ _MAIN_ITEMS = [
 ]
 
 
-def _main_status() -> str:
-    """One-line cluster verdict — the same live availability language the
-    launch review hub already shows, at the point the user is about to
-    decide what to do."""
-    try:
-        from iitgpu.slurm import get_node_stats
-        from iitgpu.splash import resource_status_line
-        return resource_status_line(get_node_stats())
-    except Exception:
-        return "[dim]cluster stats unavailable[/]"
-
-
 def run_menu() -> None:
     from iitgpu.config import load_config as _lc, is_admin as _ia
     _admin = _ia(_lc())
@@ -54,7 +42,7 @@ def run_menu() -> None:
                 info("Goodbye.")
                 return
 
-        screen("Main Menu", status=_main_status())
+        screen("Main Menu")
         _choices = list(_MAIN_ITEMS)
         if _admin:
             _choices.append("5. Admin         (cluster ops, users, audit)")
@@ -84,7 +72,7 @@ def run_menu() -> None:
 
 
 def _jobs_status() -> str:
-    """My queued/running count + free GPU slices — the two numbers someone
+    """My queued/running count + free GPU pods — the two numbers someone
     opening the Jobs menu actually wants to know before picking a screen."""
     try:
         from iitgpu.slurm import get_node_stats, queue
@@ -96,7 +84,7 @@ def _jobs_status() -> str:
         free = max(0, stats.shard_total - stats.shard_alloc) if stats and stats.shard_total else None
         parts = [f"[bold]My jobs:[/] {running} running, {pending} queued"]
         if free is not None:
-            parts.append(f"[dim]·[/] {free}/{stats.shard_total} GPU slices free")
+            parts.append(f"[dim]·[/] {free}/{stats.shard_total} GPU pods free")
         return "  ".join(parts)
     except Exception:
         return "[dim]status unavailable[/]"

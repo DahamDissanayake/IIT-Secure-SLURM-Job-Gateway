@@ -615,7 +615,7 @@ def test_resource_status_line_is_the_public_name_for_the_verdict():
     )
     line = resource_status_line(stats)
     assert "GPU" in line
-    assert "slices free" in line
+    assert "pods free" in line
 
 
 def test_pod_blocks_shows_one_glyph_per_pod_occupied_first():

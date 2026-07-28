@@ -325,7 +325,7 @@ def validate_sbatch(text: str, username: str, cfg=None) -> list[str]:
                     ceiling = _max_gpu_shards()
                     if n > ceiling:
                         errors.append(
-                            f"--gres requests {n} GPU slices; "
+                            f"--gres requests {n} GPU pods; "
                             f"the cluster has {ceiling}")
                 elif n > MAX_GPUS:
                     errors.append(
@@ -362,7 +362,7 @@ def validate_against_qos(gpu_shards: int, time_limit: str,
     Counts GPU slices (gres/shard), matching how the QOS caps usage.
     """
     if gpu_shards > max_shards_per_user:
-        return False, (f"Requested {gpu_shards} GPU slices but your QOS allows "
+        return False, (f"Requested {gpu_shards} GPU pods but your QOS allows "
                        f"{max_shards_per_user} per user.")
     if max_hours is not None and time_limit:
         m = _TIME_RE.match(time_limit)

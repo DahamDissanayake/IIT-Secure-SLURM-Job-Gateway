@@ -146,7 +146,7 @@ def test_shard_request_beyond_capacity_is_rejected(monkeypatch):
     try:
         with patch("iitgpu.slurm.get_node_stats", return_value=_stats()):
             errors = v.validate_sbatch("#SBATCH --gres=shard:9\n", "alice")
-        assert any("slices" in e for e in errors), errors
+        assert any("pods" in e for e in errors), errors
     finally:
         importlib.reload(v)
 

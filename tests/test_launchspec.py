@@ -122,8 +122,8 @@ def test_availability_line_unknown_without_stats():
     assert availability_line(None) == "GPU availability unknown"
 
 
-def test_availability_line_reports_free_slices():
-    assert availability_line(_stats(free=3)) == "GPU now: 3/4 slices free"
+def test_availability_line_reports_free_pods():
+    assert availability_line(_stats(free=3)) == "GPU now: 3/4 pods free"
 
 
 def test_to_job_spec_maps_fields():

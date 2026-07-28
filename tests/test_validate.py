@@ -349,7 +349,7 @@ def test_validate_sbatch_rejects_excess_shards_against_live_pod_count(tmp_path):
     with patch("iitgpu.daemonclient.email_for", return_value="alice@iit.lk"), \
          patch("iitgpu.slurm.get_node_stats", return_value=stats):
         errors = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
-    assert any("slice" in e.lower() or "GPU" in e for e in errors)
+    assert any("pod" in e.lower() or "GPU" in e for e in errors)
 
 
 def test_validate_sbatch_ceiling_tracks_a_resized_pod_count(tmp_path):
@@ -389,7 +389,7 @@ def test_shard_ceiling_falls_back_to_the_env_var_when_shards_report_zero(tmp_pat
             assert v._max_gpu_shards() == 4
             assert v.validate_sbatch("#SBATCH --gres=shard:4\n", "alice") == []
             over = v.validate_sbatch("#SBATCH --gres=shard:5\n", "alice")
-        assert any("slice" in e.lower() for e in over), over
+        assert any("pod" in e.lower() for e in over), over
     finally:
         os.environ.pop("MAX_GPU_SHARDS", None)
         importlib.reload(v)

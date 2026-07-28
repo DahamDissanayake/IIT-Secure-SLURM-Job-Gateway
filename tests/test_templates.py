@@ -27,7 +27,7 @@ def test_builtin_presets_gpu_count_matches_cluster(tmp_path, monkeypatch):
     for name, preset in _BUILTIN_PRESETS.items():
         shards = preset["gpu_shards"]
         assert shards <= n, (
-            f"Preset '{name}' requests {shards} GPU slices "
+            f"Preset '{name}' requests {shards} GPU pods "
             f"but the cluster has {n}"
         )
 

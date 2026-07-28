@@ -31,7 +31,7 @@ def test_hub_shows_every_field_and_availability():
     assert "train.py" in out
     assert "data-science" in out
     assert "1 pod" in out and "8 CPU" in out
-    assert "3/4 slices free" in out
+    assert "3/4 pods free" in out
     assert "4h" in out or "04:00:00" in out
 
 
