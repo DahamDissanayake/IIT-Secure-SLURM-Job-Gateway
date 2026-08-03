@@ -112,7 +112,7 @@ def load_config() -> Config:
         default_account=_get("SLURM_ACCOUNT", "default"),
         default_qos=_get("SLURM_QOS", "normal"),
         partition=_get("SLURM_PARTITION", "gpu"),
-        shared_user=_get("GATEWAY_SHARED_USER_NAME", "daham"),
+        shared_user=_get("GATEWAY_SHARED_USER_NAME", "shared"),
         gateway_shared_user=_truthy(_get("GATEWAY_SHARED_USER", "0")),
         gateway_host=_get("GATEWAY_HOST", "localhost"),
         gateway_port=_get("GATEWAY_PORT", "22"),
@@ -120,28 +120,27 @@ def load_config() -> Config:
                                "BEGIN,END,FAIL,REQUEUE,TIME_LIMIT"),
         mail_from=_get("MAIL_FROM",
                        "GPU Cluster <no-reply@example.com>"),
-        cluster_name=_get("CLUSTER_NAME", "IIT GPU Cluster"),
-        cluster_location=_get("CLUSTER_LOCATION",
-                               "IIT-CityCampus-SpencerBuilding"),
-        cluster_tz_offset=_get("CLUSTER_TZ_OFFSET", "+05:30"),
+        cluster_name=_get("CLUSTER_NAME", "GPU Cluster"),
+        cluster_location=_get("CLUSTER_LOCATION", ""),
+        cluster_tz_offset=_get("CLUSTER_TZ_OFFSET", "+00:00"),
     )
 
 
 def cluster_tz():
     """Return the cluster display timezone as a datetime.timezone object.
 
-    Reads CLUSTER_TZ_OFFSET from site.env (default +05:30 for Sri Lanka).
+    Reads CLUSTER_TZ_OFFSET from site.env (default +00:00 / UTC).
     Format: [+|-]HH:MM
     """
     from datetime import timezone, timedelta
-    offset = _get("CLUSTER_TZ_OFFSET", "+05:30")
+    offset = _get("CLUSTER_TZ_OFFSET", "+00:00")
     try:
         sign   = -1 if offset.startswith("-") else 1
         parts  = offset.lstrip("+-").split(":")
         h, m   = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
         return timezone(timedelta(hours=sign * h, minutes=sign * m))
     except Exception:
-        return timezone(timedelta(hours=5, minutes=30))
+        return timezone(timedelta(hours=0, minutes=0))
 
 
 def user_dir(cfg: "Config", username: str) -> str:

@@ -34,23 +34,23 @@ def _cluster_tz():
         from slurmdeck.config import cluster_tz
         return cluster_tz()
     except Exception:
-        return timezone(timedelta(hours=5, minutes=30))
+        return timezone(timedelta(hours=0, minutes=0))
 
 
 def _cluster_name() -> str:
     try:
         from slurmdeck.config import _get
-        return _get("CLUSTER_NAME", "IIT GPU Cluster")
+        return _get("CLUSTER_NAME", "GPU Cluster")
     except Exception:
-        return "IIT GPU Cluster"
+        return "GPU Cluster"
 
 
 def _cluster_location() -> str:
     try:
         from slurmdeck.config import _get
-        return _get("CLUSTER_LOCATION", "IIT-CityCampus-SpencerBuilding")
+        return _get("CLUSTER_LOCATION", "")
     except Exception:
-        return "IIT-CityCampus-SpencerBuilding"
+        return ""
 
 
 def _now_lk() -> str:

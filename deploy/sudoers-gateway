@@ -1,6 +1,9 @@
-# Slurm Deck: allow gpuusers to run SLURM commands as daham
-# daham (UID 1002) exists on both the login VM and the GPU host with matching
-# UIDs, so slurmstepd can resolve the user and set up the job environment.
+# Slurm Deck: allow gpuusers to run SLURM commands as the shared identity
+# (GATEWAY_SHARED_USER_NAME in site.env, default "shared"). That account must
+# exist with matching UIDs on both the login node and the GPU node, so
+# slurmstepd can resolve it and set up the job environment. Edit the username
+# below if you changed GATEWAY_SHARED_USER_NAME -- this file is copied
+# verbatim by install.sh, not templated.
 Defaults:gpuusers !lecture, timestamp_timeout=0
 
-%gpuusers ALL=(daham) NOPASSWD: /usr/bin/sbatch, /usr/bin/squeue, /usr/bin/scancel, /usr/bin/sinfo, /usr/bin/sacct
+%gpuusers ALL=(shared) NOPASSWD: /usr/bin/sbatch, /usr/bin/squeue, /usr/bin/scancel, /usr/bin/sinfo, /usr/bin/sacct

@@ -1,18 +1,23 @@
 # Slurm Deck
 
-Secure terminal gateway for SLURM GPU job submission at IIT. Users SSH in and land directly in a forced-command TUI — they can never drop to a real shell (unless explicitly provisioned as a shell user, see below). Every action is logged before it is executed, GPU capacity is split into shares so more than one person can run at once, and every user's files are jailed to their own private area on the shared filesystem.
+Secure terminal gateway for SLURM GPU job submission. Users SSH in and land directly in a forced-command TUI — they can never drop to a real shell (unless explicitly provisioned as a shell user, see below). Every action is logged before it is executed, GPU capacity is split into shares so more than one person can run at once, and every user's files are jailed to their own private area on the shared filesystem.
 
-**Current deployed cluster:**
+**Example cluster shape** (illustrative — your values come from `deploy/site.env`, see [Configuration Reference](#configuration-reference)):
 
 | | |
 |---|---|
-| Login / gateway node | `192.168.122.10` — where users SSH in, where SLURM's `slurmctld` runs, where this repo lives |
-| GPU / compute node | `192.168.122.1` (`iit-MS-7E06`) — where jobs actually run, and the NFS server for `/shared` |
-| GPU | 1× RTX 5090, split into **4 shares** (`gres/shard`) so up to 4 job slices can run at once |
-| CPU / RAM | 32 CPUs / 62 GB RAM total on the compute node |
-| SLURM | 25.11.2, `cons_tres` scheduling (jobs get exactly the CPU/mem/GPU-share they ask for, not the whole node) |
+| Login / gateway node | `<login-node-ip>` — where users SSH in, where SLURM's `slurmctld` runs, where this repo lives |
+| GPU / compute node | `<gpu-node-ip>` (`<gpu-hostname>`) — where jobs actually run, and the NFS server for `/shared` |
+| GPU | 1× `<GPU model>`, split into **N shares** (`gres/shard`) so multiple job slices can run at once |
+| CPU / RAM | however many CPUs/RAM the compute node has |
+| SLURM | `cons_tres` scheduling (jobs get exactly the CPU/mem/GPU-share they ask for, not the whole node) |
 | Shared storage | NFSv4 export mounted at `/shared` on both nodes |
 | Public SSH access | `ssh -p <GATEWAY_PORT> <username>@<GATEWAY_HOST>` (site-specific, see [Configuration Reference](#configuration-reference)) |
+
+<!-- SCREENSHOT/GIF: splash screen (slurmdeck/splash.py show_splash) immediately
+     followed by the Main Menu, ideally as a short GIF of a real SSH login
+     landing in the TUI. Suggested path: docs/images/splash-and-menu.gif -->
+![Slurm Deck splash screen and main menu](docs/images/splash-and-menu.gif)
 
 ---
 
@@ -62,8 +67,8 @@ Admins (a separate Linux group, see below) get everything above plus a full admi
 
 ```
                           ┌─────────────────────────────┐
-   SSH (users)  ────────► │   Login node 192.168.122.10 │
-   port 2225              │   sshd  ForceCommand         │
+   SSH (users)  ────────► │   Login node <login-node-ip>  │
+   port <GATEWAY_PORT>              │   sshd  ForceCommand         │
                           │   ├─ slurm-deck-gateway (scp/   │
                           │   │   rsync/sftp passthrough,│
                           │   │   or launch the TUI)     │
@@ -77,12 +82,12 @@ Admins (a separate Linux group, see below) get everything above plus a full admi
                                           │ SSH (adduser/deluser, sbatch scripts run here)
                           ┌───────────────▼─────────────┐
                           │  GPU / compute node          │
-                          │  192.168.122.1 (iit-MS-7E06)  │
+                          │  <gpu-node-ip> (<gpu-hostname>)  │
                           │  ├─ slurmd                    │
                           │  ├─ NFS server for /shared     │
                           │  ├─ slurm-deck-stats-writer        │
                           │  │   (writes GPU/CPU/RAM json)  │
-                          │  └─ RTX 5090 (gres/shard:4)      │
+                          │  └─ <GPU model> (gres/shard:N)      │
                           └───────────────────────────────┘
 ```
 
@@ -188,13 +193,13 @@ Match Group gpuadmins
     PermitTTY yes
     X11Forwarding no
     AllowTcpForwarding local          # so admins can also tunnel to JupyterLab/TensorBoard
-    PermitOpen 192.168.122.1:*        # only to the compute node, nowhere else
+    PermitOpen <gpu-node-ip>:*        # only to the compute node, nowhere else
 
 Match Group gpuusers
     ForceCommand /usr/local/bin/slurm-deck-gateway
     PermitTTY yes
     AllowTcpForwarding local          # local (-L) port-forwards only — needed for tunnels
-    PermitOpen 192.168.122.1:*        # restricted to the compute node — can't jump elsewhere
+    PermitOpen <gpu-node-ip>:*        # restricted to the compute node — can't jump elsewhere
     AllowAgentForwarding no
     AllowStreamLocalForwarding no
     X11Forwarding no
@@ -225,6 +230,11 @@ If an admin has posted a **maintenance notice**, everyone sees a yellow banner w
 ### 1. New Job
 
 The whole flow is three questions wide — what you want to do, what it runs on, then one editable **review hub** — not a long form.
+
+<!-- SCREENSHOT: the New Job review hub (slurmdeck/review.py) showing an
+     editable job summary with live GPU-slice availability. Suggested path:
+     docs/images/new-job-review-hub.png -->
+![New Job review hub](docs/images/new-job-review-hub.png)
 
 **Step 1 — pick an intent:**
 
@@ -282,6 +292,11 @@ Actions:
 
 ### 3. Jobs
 
+<!-- SCREENSHOT: the live dashboard (slurmdeck/dashboard.py) — cluster panel
+     (GPU/CPU/RAM alloc), jobs table (all users), and a job's live log tail.
+     Suggested path: docs/images/live-dashboard.png -->
+![Live dashboard](docs/images/live-dashboard.png)
+
 ```
 Live dashboard  (auto-refresh)
 View queue
@@ -330,6 +345,10 @@ Advanced SLURM shell
 ### 5. Admin (admins only)
 
 Shown only if you're in `gpuadmins`. The status line always shows active user count, mail service on/off, and a maintenance flag if set.
+
+<!-- SCREENSHOT: the Admin panel menu (slurmdeck/menu.py admin submenu).
+     Suggested path: docs/images/admin-panel.png -->
+![Admin panel](docs/images/admin-panel.png)
 
 ```
 ──  User Management  ──────────────────────────
@@ -472,11 +491,11 @@ sudo visudo -cf /etc/sudoers.d/slurm-deck-admin   # verify before trusting it
 
 `slurm-deck-adduser.sh` needs to know how to reach the compute node as a sudo-capable account:
 ```bash
-echo 'GPU_HOST_SSH=root@192.168.122.1' | sudo tee -a /opt/slurm-deck/deploy/site.env
+echo 'GPU_HOST_SSH=root@<gpu-node-ip>' | sudo tee -a /opt/slurm-deck/deploy/site.env
 ```
 Test password-less SSH works before provisioning anyone:
 ```bash
-ssh root@192.168.122.1 true
+ssh root@<gpu-node-ip> true
 ```
 
 ### Step 5 — Verify the service
@@ -548,6 +567,12 @@ login-node setup (over SSH once the target is reachable), cross-node
 permission sync, mail, first-admin provisioning, and validation — follows
 in one continuous run.
 
+<!-- SCREENSHOT/GIF: a terminal recording of install-wizard.sh running end
+     to end against a real (or throwaway) machine, showing the mode-select
+     prompt through a confirm-risky checkpoint. Suggested path:
+     docs/images/install-wizard.gif -->
+![Installation wizard running](docs/images/install-wizard.gif)
+
 ---
 
 ## Adding and removing users
@@ -611,7 +636,7 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 | `SLURM_QOS` | `normal` | SLURM QOS new users are registered under |
 | `SLURM_PARTITION` | `gpu` | Default partition for job submission |
 | `GATEWAY_SHARED_USER` | `0` | Legacy: `1` runs all SLURM commands as one shared identity instead of each user's own account |
-| `GATEWAY_SHARED_USER_NAME` | `daham` | The shared identity, if the above is on |
+| `GATEWAY_SHARED_USER_NAME` | `shared` | The shared identity, if the above is on |
 | `UID_MIN` / `UID_MAX` | `2000` / `60000` | UID range `slurm-deck-adduser` picks new accounts from |
 
 ### Gateway / tunnels
@@ -637,9 +662,9 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 |---|---|---|
 | `MAIL_FROM` | `GPU Cluster <no-reply@example.com>` | From: address for transactional mail |
 | `NOTIFY_MAIL_TYPES` | `BEGIN,END,FAIL,REQUEUE,TIME_LIMIT` | SLURM `--mail-type` value used when a job has `--mail-user` set |
-| `CLUSTER_NAME` | `IIT GPU Cluster` | Display name (emails, TUI) |
-| `CLUSTER_LOCATION` | `IIT-CityCampus-SpencerBuilding` | Display network label |
-| `CLUSTER_TZ_OFFSET` | `+05:30` | UTC offset used when rendering timestamps |
+| `CLUSTER_NAME` | `GPU Cluster` | Display name (emails, TUI) |
+| `CLUSTER_LOCATION` | *(empty)* | Display network label |
+| `CLUSTER_TZ_OFFSET` | `+00:00` | UTC offset used when rendering timestamps |
 | `RESEND_API_KEY` | *(none)* | **Set only in `deploy/secrets.env`**, never `site.env` — the transactional-mail API key |
 
 ### Audit
@@ -694,7 +719,7 @@ By default SLURM gives a job the entire GPU it requests. This cluster instead sp
 - One-pod tasks (notebook / interactive / inference) get one pod's worth of CPU and memory too — splitting the GPU alone is pointless if 2 jobs still fight over all the RAM.
 - `train`/`finetune`/`custom` tasks request every pod on the node by default (`jobs.TASK_POD_DEFAULTS`, the `"all"` sentinel).
 - When the live reading is unavailable the tool says so ("GPU availability unknown") and keeps its built-in one-pod defaults, rather than claiming a share it cannot verify.
-- Shares are a **scheduling** split only, not VRAM isolation — 4 co-resident jobs share the physical 32 GB and can, in principle, OOM each other. The wizard's review hub shows a VRAM sanity check before launch. True hard isolation would require NVIDIA MPS (not configured) — MIG is not an option on a consumer RTX 5090.
+- Shares are a **scheduling** split only, not VRAM isolation — co-resident jobs share the physical VRAM and can, in principle, OOM each other. The wizard's review hub shows a VRAM sanity check before launch. True hard isolation would require NVIDIA MPS (not configured) — MIG is not an option on consumer-tier GPUs.
 - The QOS enforces `MaxTRESPerUser=gres/gpu=1,gres/shard=4` — one whole GPU's worth of shares, whichever form a job requests.
 
 ---
@@ -794,7 +819,7 @@ Every row below must fail for the deployment to be correctly locked down. Verify
 |---|---|
 | `ssh user@host bash` | `ForceCommand` in the `gpuusers` `Match` block always runs `slurm-deck-gateway` → the TUI |
 | `ssh -R`/remote or `-D` dynamic forwarding | Only `AllowTcpForwarding local` is granted — remote/dynamic forwarding is refused |
-| `ssh -L 8080:internal-host:80` to a host *other* than the compute node | `PermitOpen 192.168.122.1:*` restricts local forwards to the compute node only |
+| `ssh -L 8080:internal-host:80` to a host *other* than the compute node | `PermitOpen <gpu-node-ip>:*` restricts local forwards to the compute node only |
 | `ssh -A` (agent forwarding) | `AllowAgentForwarding no` |
 | X11 forwarding | `X11Forwarding no` |
 | Unix-socket forwarding | `AllowStreamLocalForwarding no` |
