@@ -277,7 +277,10 @@ def _tres_value(tres: str, key: str) -> int:
     return 0
 
 
-def get_node_stats(node_name: str = "iit-MS-7E06") -> NodeStats | None:
+def get_node_stats(node_name: str | None = None) -> NodeStats | None:
+    if node_name is None:
+        from slurmdeck.config import load_config
+        node_name = load_config().compute_node_name
     """Return live stats: SLURM allocation from scontrol + actual utilization from stats file."""
     try:
         result = subprocess.run(

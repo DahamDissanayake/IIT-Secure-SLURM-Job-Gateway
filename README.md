@@ -673,6 +673,7 @@ All settings are environment variables, layered lowest-to-highest priority: **bu
 | `SLURM_ACCOUNT` | `default` | SLURM account new users are registered under |
 | `SLURM_QOS` | `normal` | SLURM QOS new users are registered under |
 | `SLURM_PARTITION` | `gpu` | Default partition for job submission |
+| `COMPUTE_NODE_NAME` | `gpu-node` | SLURM `NodeName` of the GPU/compute node — shown on the live dashboard and used for admin pod-resize/node queries |
 | `GATEWAY_SHARED_USER` | `0` | Legacy: `1` runs all SLURM commands as one shared identity instead of each user's own account |
 | `GATEWAY_SHARED_USER_NAME` | `shared` | The shared identity, if the above is on |
 | `UID_MIN` / `UID_MAX` | `2000` / `60000` | UID range `slurm-deck-adduser` picks new accounts from |

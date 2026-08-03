@@ -8,6 +8,7 @@ def _cfg(**over):
         demo_mode=False, sacct_enabled=False,
         gpuusers_group="gpuusers", admin_group="gpuadmins",
         default_account="default", default_qos="normal", partition="gpu",
+        compute_node_name="gpu-node",
         shared_user="daham", gateway_shared_user=False,
         gateway_host="localhost", gateway_port="22",
         notify_mail_types="BEGIN,END,FAIL,REQUEUE,TIME_LIMIT",

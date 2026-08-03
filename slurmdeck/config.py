@@ -71,6 +71,7 @@ class Config:
     default_account: str      # SLURM account for normal users
     default_qos: str          # SLURM QOS for normal users
     partition: str            # default SLURM partition
+    compute_node_name: str    # SLURM NodeName of the GPU/compute node
     shared_user: str          # legacy shared SLURM user (e.g. "daham")
     gateway_shared_user: bool # True → run SLURM as shared_user via sudo (legacy)
     # Gateway / tunnels (for notebook & service SSH hints)
@@ -112,6 +113,7 @@ def load_config() -> Config:
         default_account=_get("SLURM_ACCOUNT", "default"),
         default_qos=_get("SLURM_QOS", "normal"),
         partition=_get("SLURM_PARTITION", "gpu"),
+        compute_node_name=_get("COMPUTE_NODE_NAME", "gpu-node"),
         shared_user=_get("GATEWAY_SHARED_USER_NAME", "shared"),
         gateway_shared_user=_truthy(_get("GATEWAY_SHARED_USER", "0")),
         gateway_host=_get("GATEWAY_HOST", "localhost"),

@@ -177,7 +177,9 @@ def _build_cluster_panel(stats: NodeStats | None) -> Panel:
             cpu_str = f"CPU [bold]{stats.cpu_alloc}/{stats.cpu_total}[/] [dim]load {stats.cpu_load:.2f}[/]"
             mem_str = f"RAM [bold]{stats.mem_alloc_mb//1024}/{stats.mem_total_mb//1024} GB[/] [dim]alloc[/]"
 
-        body = f"  iit-MS-7E06  [{sc}]{state}[/]  │  {gpu_str}  │  {cpu_str}  │  {mem_str}"
+        from slurmdeck.config import load_config
+        _node = load_config().compute_node_name
+        body = f"  {_node}  [{sc}]{state}[/]  │  {gpu_str}  │  {cpu_str}  │  {mem_str}"
 
     return Panel(body, title="[bold]Cluster[/bold]", border_style="blue", height=3)
 
@@ -425,8 +427,10 @@ def _build_hw_panel(stats: NodeStats | None) -> Panel:
             f"  [dim]({mem_pct:.0f}%)[/dim]"
         )
     else:
+        from slurmdeck.config import load_config
+        _node = load_config().compute_node_name
         lines.append("  [yellow]Live stats unavailable[/yellow]  "
-                     "[dim]— slurm-deck-stats-writer not running on iit-MS-7E06[/dim]")
+                     f"[dim]— slurm-deck-stats-writer not running on {_node}[/dim]")
         lines.append("")
         lines.append("  [dim]Start it with:  python3 /usr/local/bin/slurm-deck-stats-writer &[/dim]")
 
@@ -448,7 +452,9 @@ def _build_hw_panel(stats: NodeStats | None) -> Panel:
         )
 
     lines.append("")
-    return Panel("\n".join(lines), title="[bold]Hardware Stats: iit-MS-7E06[/bold]", border_style="blue")
+    from slurmdeck.config import load_config
+    _node = load_config().compute_node_name
+    return Panel("\n".join(lines), title=f"[bold]Hardware Stats: {_node}[/bold]", border_style="blue")
 
 
 def run_hardware_stats() -> None:

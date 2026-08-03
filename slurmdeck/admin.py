@@ -466,7 +466,9 @@ def set_qos_priority(qos_name: str, priority: int) -> tuple[bool, str]:
 
 # ── Pods sub-menu ─────────────────────────────────────────────────────────────────
 
-def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
+def resize_pod_count(new_n: int, node: str | None = None) -> tuple[bool, str]:
+    if node is None:
+        node = load_config().compute_node_name
     """Admin action: change the cluster's pod count. Refuses if any job is
     running/queued anywhere, or if new_n would floor CPU/mem per pod to
     zero. Otherwise shells out to resize-pods.sh, which does the actual
@@ -505,7 +507,9 @@ def resize_pod_count(new_n: int, node: str = "iit-MS-7E06") -> tuple[bool, str]:
     return True, (out.strip() or f"resize applied: pod count is now {new_n}")
 
 
-def _pods_menu(style, node: str = "iit-MS-7E06") -> None:
+def _pods_menu(style, node: str | None = None) -> None:
+    if node is None:
+        node = load_config().compute_node_name
     import questionary
     from rich.table import Table
     from slurmdeck.pods import fits_new_pod_count, pod_count, pod_count_known, pod_resources
@@ -1108,7 +1112,7 @@ def admin_menu() -> None:
         return
 
     style = STYLE
-    node_default = "iit-MS-7E06"
+    node_default = load_config().compute_node_name
 
     while True:
         _mail_state = "OFF — disabled" if is_mail_disabled() else "ON"
