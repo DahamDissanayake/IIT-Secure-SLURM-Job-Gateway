@@ -30,7 +30,7 @@ Secure terminal gateway for SLURM GPU job submission at IIT. Users SSH in and la
    - [5. Admin](#5-admin-admins-only)
 5. [Linux machine setup (before installation)](#linux-machine-setup-before-installation)
 6. [Installation](#installation)
-7. [Installing via an AI coding agent (slurm-deck-installer skill)](#installing-via-an-ai-coding-agent-slurm-deck-installer-skill)
+7. [Installation wizard](#installation-wizard)
 8. [Adding and removing users](#adding-and-removing-users)
 9. [Configuration reference](#configuration-reference)
 10. [Audit logging](#audit-logging)
@@ -514,33 +514,39 @@ Restart `slurmctld` (login node) then `slurmd` (compute node) — in that order;
 
 ---
 
-## Installing via an AI coding agent (slurm-deck-installer skill)
+## Installation wizard
 
-This repo ships an `slurm-deck-installer` skill that drives the install above as a
-**guided, checkpointed** conversation instead of a blind one-shot script: it
-runs the preflight checks from [Linux machine setup](#linux-machine-setup-before-installation),
-interviews you for the site-specific values `deploy/site.env` needs, then
-walks through `install.sh`, the admin sudoers file, GPU-host SSH, service
-verification, first-admin provisioning, and optional GPU sharing — asking
-for explicit confirmation before every root/sudo/sshd/sudoers/systemd action.
-It never runs the whole install unattended.
+The steps in [Installation](#installation) above can be run by hand, or
+walked through interactively with `deploy/wizard/` — a standalone,
+zero-dependency Python script (no `rich`/`questionary`, so it works before
+anything else is installed) that drives the same install.sh /
+setup-compute-toolchain.sh / sync-admin-group.sh / fix-shared-perms.sh
+scripts with an interactive front end: it collects the site-specific values
+`site.env` needs, sets up Resend email (collects the API key, verifies it
+against Resend's API live, walks you through DNS domain verification),
+provisions your first admin account, and runs a final validation pass —
+pausing for an explicit confirmation before every root/sudo/sshd/sudoers/
+systemd/NFS-export action. Nothing runs unattended, and it's safe to
+re-run if interrupted (Ctrl-C, a dropped SSH session, a crash) — already
+completed steps are detected and skipped, see `deploy/wizard/state.py`.
 
-### Claude Code
+On a **fresh GPU host with nothing installed yet**, it can also create the
+login-node VM itself (via `virt-install`/libvirt on the host's `default`
+NAT network) and set up port-forwarding to it — matching how this
+project's own reference cluster is built: one physical GPU host running a
+login-node VM, reached over a forwarded SSH port.
 
 ```bash
-/plugin marketplace add DahamDissanayake/slurm-deck
-/plugin install slurm-deck-installer@slurm-deck
-/slurm-deck-installer
+git clone https://github.com/DahamDissanayake/slurm-deck.git
+cd slurm-deck
+sudo bash install-wizard.sh
 ```
 
-Then answer its questions and approve each checkpoint as it comes up.
-
-### Any other AI coding agent
-
-Open [`skills/slurm-deck-installer/AGENT-INSTRUCTIONS.md`](skills/slurm-deck-installer/AGENT-INSTRUCTIONS.md)
-and paste it into your assistant of choice (Cursor, Copilot Workspace,
-Windsurf, etc.) with this repo open — it describes the same guided,
-checkpointed process in agent-agnostic terms.
+You'll be asked up front whether to create the login-node VM or point at
+two machines you already have. Everything after that — GPU-node setup,
+login-node setup (over SSH once the target is reachable), cross-node
+permission sync, mail, first-admin provisioning, and validation — follows
+in one continuous run.
 
 ---
 
