@@ -269,10 +269,9 @@ If an admin has posted a **maintenance notice**, everyone sees a yellow banner w
 
 The whole flow is three questions wide — what you want to do, what it runs on, then one editable **review hub** — not a long form.
 
-<!-- SCREENSHOT: the New Job review hub (slurmdeck/review.py) showing an
-     editable job summary with live GPU-slice availability. Suggested path:
-     docs/images/new-job-review-hub.png -->
-![New Job review hub](docs/images/new-job-review-hub.png)
+<!-- Real capture: the review hub after picking "Open JupyterLab", from a
+     live --demo run (slurmdeck/review.py), not a mockup. -->
+![New Job review hub](docs/images/new-job-review-hub.svg)
 
 **Step 1 — pick an intent:**
 
@@ -330,10 +329,9 @@ Actions:
 
 ### 3. Jobs
 
-<!-- SCREENSHOT: the live dashboard (slurmdeck/dashboard.py) — cluster panel
-     (GPU/CPU/RAM alloc), jobs table (all users), and a job's live log tail.
-     Suggested path: docs/images/live-dashboard.png -->
-![Live dashboard](docs/images/live-dashboard.png)
+<!-- Real capture: the live dashboard with one demo job queued, from a live
+     --demo run (slurmdeck/dashboard.py), not a mockup. -->
+![Live dashboard](docs/images/live-dashboard.svg)
 
 ```
 Live dashboard  (auto-refresh)
@@ -384,9 +382,9 @@ Advanced SLURM shell
 
 Shown only if you're in `gpuadmins`. The status line always shows active user count, mail service on/off, and a maintenance flag if set.
 
-<!-- SCREENSHOT: the Admin panel menu (slurmdeck/menu.py admin submenu).
-     Suggested path: docs/images/admin-panel.png -->
-![Admin panel](docs/images/admin-panel.png)
+<!-- Real capture: the Admin submenu, from a live --demo run
+     (slurmdeck/menu.py), not a mockup. -->
+![Admin panel](docs/images/admin-panel.svg)
 
 ```
 ──  User Management  ──────────────────────────
@@ -605,11 +603,11 @@ login-node setup (over SSH once the target is reachable), cross-node
 permission sync, mail, first-admin provisioning, and validation — follows
 in one continuous run.
 
-<!-- SCREENSHOT/GIF: a terminal recording of install-wizard.sh running end
-     to end against a real (or throwaway) machine, showing the mode-select
-     prompt through a confirm-risky checkpoint. Suggested path:
-     docs/images/install-wizard.gif -->
-![Installation wizard running](docs/images/install-wizard.gif)
+<!-- Real capture: install-wizard.sh from the mode-select prompt through its
+     first confirm-risky checkpoint (declined, nothing executed). A static
+     frame, not an animation -- see docs/images/README.md if you want to
+     replace this with a real recording of a full run. -->
+![Installation wizard running](docs/images/install-wizard.svg)
 
 ---
 

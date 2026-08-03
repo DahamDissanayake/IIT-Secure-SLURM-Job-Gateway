@@ -1,50 +1,48 @@
-# Screenshots / GIFs checklist
+# Screenshots
 
-Images referenced by the main [`README.md`](../../README.md). Drop files at
-the exact paths below and the placeholders there start rendering — no other
-changes needed.
+All five images `README.md` references are real captures of the actual TUI
+running in `--demo` mode, not mockups. None of them touched a real cluster.
 
-## Done
+| Path | What it shows |
+|---|---|
+| `splash-and-menu.svg` | Splash screen through the Main Menu. |
+| `new-job-review-hub.svg` | The New Job review hub after picking "Open JupyterLab". |
+| `live-dashboard.svg` | The live dashboard with one demo job queued. |
+| `admin-panel.svg` | The Admin submenu (all 16 items). |
+| `install-wizard.svg` | `install-wizard.sh`, mode-select through its first confirm-risky checkpoint (declined -- nothing executed). Static, not an animated recording; see "Improving on this" below if you want a real GIF of a full run. |
 
-| Path | Format | What it shows |
-|---|---|---|
-| `splash-and-menu.svg` | SVG | Splash screen through the Main Menu — a real capture from a `--demo` run, not a mockup (see "How this one was made" below). |
+## How they were made
 
-## Still needed
+No real terminal or GUI was screenshotted:
 
-| Path | Format | What to capture |
-|---|---|---|
-| `new-job-review-hub.png` | PNG | The New Job wizard's editable review hub (`slurmdeck/review.py`) — job summary with live GPU-slice availability. |
-| `live-dashboard.png` | PNG | The live dashboard (`slurmdeck/dashboard.py`) — cluster panel, jobs table, a job's log tail. |
-| `admin-panel.png` | PNG | The Admin submenu (`slurmdeck/menu.py`) — the full 16-item admin panel. |
-| `install-wizard.gif` | GIF | `install-wizard.sh` running end to end against a real or throwaway machine — mode-select prompt through at least one confirm-risky checkpoint. |
-
-**Capture tips:**
-- Terminal recordings: [asciinema](https://asciinema.org/) + [agg](https://github.com/asciinema/agg) (asciinema→GIF) give clean, small GIFs; `ttyrec`/`peek`/`terminalizer` work too.
-- Use a terminal profile with a readable font size and a reasonably narrow width (~100 cols) so the images aren't squashed when rendered in GitHub's markdown viewer.
-- Redact anything site-specific (real hostnames, IPs, usernames, emails) before capturing, or capture against `DEMO_MODE=1` (see [Demo mode](../../README.md#demo-mode-no-slurm-required)) so nothing needs redacting.
-
-## How `splash-and-menu.svg` was made
-
-No real terminal or GUI was screenshotted — it's a genuine capture of the
-actual TUI, not a mockup, produced without touching a real cluster:
-
-1. Ran `python3 -m slurmdeck --demo` inside a real PTY (`pexpect.spawn`,
-   `DEMO_MODE=1`, an isolated `NFS_ROOT`/`HOME` under `/tmp`), with
-   `slurmdeck.slurm.get_node_stats` monkeypatched to return fixed, clearly
-   fake numbers instead of live cluster data.
+1. Ran `python3 -m slurmdeck --demo` (or `install-wizard.sh`) inside a real
+   PTY (`pexpect.spawn`), scripting the exact prompts/keystrokes needed to
+   reach each screen. Isolated `NFS_ROOT`/`HOME` under `/tmp`, and forced
+   `SACCT_ENABLED=0` and a fake `GATEWAY_HOST` -- `DEMO_MODE=1` alone does
+   **not** fully isolate from the real cluster: `slurm.get_node_stats()`
+   still queries live hardware stats and `filtered_history()` still shells
+   out to real `sacct` if available, so both were monkeypatched to return
+   fixed, obviously-fake numbers before capturing. Worth knowing if you
+   reuse this technique against a live cluster -- always check what a
+   `--demo` run actually touches before trusting it's isolated.
 2. Fed the raw captured bytes through `pyte` (a terminal emulator library)
-   to get the correct final screen state — this matters because the splash
-   screen's live status panel redraws in place, so a raw byte dump alone
-   shows overlapping frames.
+   to get the correct final screen state -- this matters because live
+   panels (the splash screen's status line, the dashboard) redraw in
+   place, so a raw byte dump alone shows overlapping frames.
 3. Converted `pyte`'s per-cell styled grid into a `rich.text.Text` per row,
-   printed it to a `rich.console.Console(record=True)`, and called
-   `.save_svg()`.
+   cropped to the rows that matter, printed to a
+   `rich.console.Console(record=True)`, and exported with `.save_svg()`.
 
-The same technique works for any other screen in this list — swap the
-`pexpect` interaction (what's typed, how long to wait) for whatever gets you
-to the screen you want, and everything from step 2 onward is unchanged. The
-`new-job-review-hub.png`/`live-dashboard.png`/`admin-panel.png` targets
-above would need real job data faked similarly (or genuinely submitted, if
-capturing on a disposable demo cluster) before the picker widgets would show
-anything meaningful.
+## Improving on this
+
+- `install-wizard.svg` is a single static frame. A real animated GIF of a
+  full run (asciinema + [agg](https://github.com/asciinema/agg), or any
+  terminal recorder) would show the confirm-checkpoint flow much better.
+- `live-dashboard.svg` shows a job stuck at `PENDING` (demo mode never
+  actually starts it) -- capturing right after a state transition, or
+  faking `queue()` with a `RUNNING` entry, would look livelier.
+- Real usage discovers real gaps: while building these, two site-specific
+  values turned out to be hardcoded in the app itself rather than read
+  from config (`slurmdeck/slurm.py`'s compute node hostname default, and
+  `slurmdeck/splash.py`'s tagline) -- both fixed. `filtered_history()`
+  bypassing `DEMO_MODE` (point 1 above) is still open.
