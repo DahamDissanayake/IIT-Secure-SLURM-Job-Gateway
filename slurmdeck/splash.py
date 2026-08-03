@@ -43,7 +43,7 @@ def show_splash(pause: float = 1.5) -> None:
     deck = Text(_ART_DECK.strip("\n"), style="cyan")
 
     tagline = Text(
-        "GPU Cluster Job Manager  ·  SLURM 25.11.2  ·  RTX 5090",
+        "Secure SLURM Job Gateway  ·  Multi-user GPU Sharing",
         style="dim white",
     )
     sep = Text("─" * 46, style="dim cyan")

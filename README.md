@@ -14,38 +14,38 @@ Secure terminal gateway for SLURM GPU job submission. Users SSH in and land dire
 | Shared storage | NFSv4 export mounted at `/shared` on both nodes |
 | Public SSH access | `ssh -p <GATEWAY_PORT> <username>@<GATEWAY_HOST>` (site-specific, see [Configuration Reference](#configuration-reference)) |
 
-<!-- SCREENSHOT/GIF: splash screen (slurmdeck/splash.py show_splash) immediately
-     followed by the Main Menu, ideally as a short GIF of a real SSH login
-     landing in the TUI. Suggested path: docs/images/splash-and-menu.gif -->
-![Slurm Deck splash screen and main menu](docs/images/splash-and-menu.gif)
+<!-- Real capture: splash screen through the Main Menu, taken from a live
+     --demo run (slurmdeck/splash.py + slurmdeck/menu.py), not a mockup. -->
+![Slurm Deck splash screen and main menu](docs/images/splash-and-menu.svg)
 
 ---
 
 ## Table of Contents
 
 1. [What this is](#what-this-is)
-2. [Architecture](#architecture)
-3. [Linux users, groups & access model](#linux-users-groups--access-model)
-4. [Using the tool — full menu reference](#using-the-tool--full-menu-reference)
+2. [What you can run](#what-you-can-run)
+3. [Architecture](#architecture)
+4. [Linux users, groups & access model](#linux-users-groups--access-model)
+5. [Using the tool — full menu reference](#using-the-tool--full-menu-reference)
    - [Main Menu](#main-menu)
    - [1. New Job](#1-new-job)
    - [2. My Workspace](#2-my-workspace)
    - [3. Jobs](#3-jobs)
    - [4. Settings](#4-settings)
    - [5. Admin](#5-admin-admins-only)
-5. [Linux machine setup (before installation)](#linux-machine-setup-before-installation)
-6. [Installation](#installation)
-7. [Installation wizard](#installation-wizard)
-8. [Adding and removing users](#adding-and-removing-users)
-9. [Configuration reference](#configuration-reference)
-10. [Audit logging](#audit-logging)
-11. [Mail / notifications](#mail--notifications)
-12. [GPU sharing model](#gpu-sharing-model)
-13. [Demo mode (no SLURM required)](#demo-mode-no-slurm-required)
-14. [Running the test suite](#running-the-test-suite)
-15. [Project layout](#project-layout)
-16. [Security model / bypass-test checklist](#security-model--bypass-test-checklist)
-17. [Day-2 operations (maintainers)](#day-2-operations-maintainers)
+6. [Linux machine setup (before installation)](#linux-machine-setup-before-installation)
+7. [Installation](#installation)
+8. [Installation wizard](#installation-wizard)
+9. [Adding and removing users](#adding-and-removing-users)
+10. [Configuration reference](#configuration-reference)
+11. [Audit logging](#audit-logging)
+12. [Mail / notifications](#mail--notifications)
+13. [GPU sharing model](#gpu-sharing-model)
+14. [Demo mode (no SLURM required)](#demo-mode-no-slurm-required)
+15. [Running the test suite](#running-the-test-suite)
+16. [Project layout](#project-layout)
+17. [Security model / bypass-test checklist](#security-model--bypass-test-checklist)
+18. [Day-2 operations (maintainers)](#day-2-operations-maintainers)
 
 ---
 
@@ -60,6 +60,44 @@ Users with no Linux or SLURM knowledge SSH in, build a conda/venv/container envi
 - Keeps every regular user confined to their own folder on the shared filesystem — they cannot browse, read, or write anyone else's files, even though everyone shares one NFS export
 
 Admins (a separate Linux group, see below) get everything above plus a full admin panel: provisioning/offboarding users, draining/resuming the compute node, cluster-wide usage reports, and cancelling *any* user's job.
+
+---
+
+## What you can run
+
+Any conda environment, container image, or plain script — the tool doesn't limit
+you to a fixed set of workloads. Five ready-to-use environments ship with the
+repo (`envs/specs/*.yml` for conda, `deploy/images/*.def` for Apptainer/Singularity
+containers), covering the common cases so most people never need to build their
+own:
+
+| Environment | What it's for | Key packages |
+|---|---|---|
+| `data-science` | General analysis, classic ML | pandas, scikit-learn, PyTorch |
+| `vision` | Computer vision training | PyTorch, torchvision |
+| `diffusion` | Image generation / diffusion model training | PyTorch, torchvision |
+| `llm-finetune` | LLM fine-tuning (LoRA / QLoRA) | PyTorch, `transformers`, `peft`, `trl`, `bitsandbytes` |
+| `llm-serve` | LLM inference serving | PyTorch, `vllm` |
+
+On top of the prebuilt environments:
+
+- **JupyterLab** for interactive development — pick "Open JupyterLab" from New
+  Job, choose an environment, and you land in a browser-connected notebook on
+  the GPU once the job schedules and the server comes up.
+- **Notebooks as unattended batch jobs** — pick "Run a script or notebook" and
+  hand it a `.ipynb`: it runs end-to-end via `papermill`, streaming each cell's
+  output live to the job log, with **auto-dependency-install** — a
+  `ModuleNotFoundError` mid-run gets `pip install`ed automatically and the cell
+  retried, so a notebook someone else wrote doesn't need a perfectly matched
+  environment before it can run unattended.
+- **Fine-tuning as a first-class intent** — "Fine-tune a model" pre-fills a
+  batch job with the `llm-finetune` environment and a whole GPU, then asks two
+  extra guided questions (base model, dataset) before dropping you into the
+  same review hub as any other job.
+- **Your own environment** — a conda env or venv you built yourself, a jailed
+  `.sif` container, or plain system Python; nothing is hardcoded to the five
+  prebuilt ones. See [1. New Job](#1-new-job) for the full picture, including
+  TensorBoard tunnels and the job review hub.
 
 ---
 
@@ -123,9 +161,9 @@ Every account is provisioned with `deploy/slurm-deck-adduser.sh` (directly, or v
 
 | Type | Flag | `gpuusers`? | `gpuadmins`? | Gets on login | Audited? |
 |---|---|---|---|---|---|
-| **tool** (default) | *(none)* | ✅ | ❌ | Forced into the TUI, no shell | ✅ Yes |
-| **admin** | `--admin` | ✅ | ✅ | Forced into the TUI **plus** the Admin menu item | ✅ Yes |
-| **shell** | `--shell-user` | ❌ | ❌ | A real `bash` login shell on the login node (`docker` group only) | ❌ **No** — explicitly not audited; use only when the TUI genuinely can't do what's needed |
+| **tool** (default) | *(none)* | ✔ | ✘ | Forced into the TUI, no shell | ✔ Yes |
+| **admin** | `--admin` | ✔ | ✔ | Forced into the TUI **plus** the Admin menu item | ✔ Yes |
+| **shell** | `--shell-user` | ✘ | ✘ | A real `bash` login shell on the login node (`docker` group only) | ✘ **No** — explicitly not audited; use only when the TUI genuinely can't do what's needed |
 
 Regardless of type, every account is also:
 - Registered as a real SLURM association (`sacctmgr add user <name> account=<SLURM_ACCOUNT> qos=<SLURM_QOS>`), so SLURM enforces its own per-user resource caps independently of the TUI.
