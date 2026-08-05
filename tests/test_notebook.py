@@ -268,3 +268,28 @@ def test_notebook_sbatch_token_echo_uses_double_quotes(tmp_path):
     sq_url = chr(39) + "Then open in browser:"
     assert dq_url in script, "URL echo must use double quotes"
     assert sq_url not in script, "URL echo must not use single quotes"
+
+
+def test_notebook_sbatch_exports_shell_for_terminal(tmp_path):
+    """JupyterLab terminals spawn via terminado, which picks the shell from
+    the SHELL env var (falling back to plain 'sh'/dash otherwise). The sbatch
+    script never set SHELL, so terminals came up in dash -- no readline, so
+    tab-completion and up/down command history didn't work (reported live:
+    up-arrow printed a literal '[[A' instead of recalling history). The
+    script must export SHELL=/bin/bash before the jupyter launch line."""
+    from slurmdeck.jobs import make_job_folder, render_notebook_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_notebook_sbatch(spec, folder)
+    assert 'export SHELL=/bin/bash' in script
+    assert script.index('export SHELL=/bin/bash') < script.index('jupyter lab')
+
+
+def test_tensorboard_sbatch_no_shell_export_needed(tmp_path):
+    """TensorBoard has no interactive terminal, so this export is specific
+    to the notebook launcher and shouldn't leak into unrelated sbatch types."""
+    from slurmdeck.jobs import make_job_folder, render_sbatch
+    spec = _nb_spec()
+    folder = make_job_folder(str(tmp_path), spec)
+    script = render_sbatch(spec, folder)
+    assert 'export SHELL=/bin/bash' not in script

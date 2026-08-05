@@ -487,6 +487,14 @@ def render_notebook_sbatch(
         f"#SBATCH --error={folder}/slurm-%j.err",
         f"#SBATCH --chdir={folder}",
         "",
+        # JupyterLab's terminal (terminado) picks the shell to spawn from the
+        # SHELL env var, falling back to plain sh/dash when unset -- dash has
+        # no readline, so tab-completion and up/down history silently don't
+        # work in notebook terminals (reported live: up-arrow printed a
+        # literal "[[A"). sbatch jobs don't inherit an interactive SHELL, so
+        # set it explicitly before jupyter launches.
+        "export SHELL=/bin/bash",
+        "",
     ]
 
     # Environment activation (container or conda/venv)
