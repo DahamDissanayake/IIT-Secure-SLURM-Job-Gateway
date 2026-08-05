@@ -8,8 +8,11 @@
 #   --admin       → gpuusers + gpuadmins; forced-TUI + admin panel; audited
 #   --shell-user  → NO gpuusers / NO gpuadmins; real bash shell; NOT audited
 #                   Still gets a SLURM association and /shared/users/<user>.
-#                   Also joins the `docker` group on the login node (only node
-#                   with a Docker daemon), so they can use docker without sudo.
+#
+# Every account type joins the `docker` group on BOTH nodes (login node and
+# GPU host both run a Docker daemon), so they can `docker build`/`docker run`
+# without sudo — needed for JupyterLab/notebook work on the GPU host as much
+# as shell sessions on the login node.
 #
 # --admin and --shell-user are mutually exclusive.
 #
@@ -86,15 +89,11 @@ run "useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || tr
 # read their own dotfiles -- e.g. ~/.config/conda/.condarc -- so `conda activate`
 # crashes and notebook/job env activation fails. Force home ownership to match.
 run "chown -R $NEW_UID:$NEW_UID /home/$USERNAME"
-if [ "$SHELL_USER" = 0 ]; then
-    run "usermod -aG $GPUUSERS_GROUP $USERNAME"
-else
-    # Shell users get a real login on this node, so give them docker access
-    # here (only) rather than sudo, matching how gpuusers get GPU access via
-    # a group rather than sudo.
-    run "getent group $DOCKER_GROUP >/dev/null 2>&1 && usermod -aG $DOCKER_GROUP $USERNAME || true"
-fi
+[ "$SHELL_USER" = 0 ] && run "usermod -aG $GPUUSERS_GROUP $USERNAME"
 [ "$ADMIN" = 1 ] && run "getent group $ADMIN_GROUP >/dev/null 2>&1 && usermod -aG $ADMIN_GROUP $USERNAME || true"
+# Every account type gets docker access via group rather than sudo, matching
+# how gpuusers get GPU access via a group rather than sudo.
+run "getent group $DOCKER_GROUP >/dev/null 2>&1 && usermod -aG $DOCKER_GROUP $USERNAME || true"
 ok "login: $USERNAME created"
 
 # ── 3. Create on GPU host (same UID) ───────────────────────────────────────────
@@ -104,19 +103,18 @@ ok "login: $USERNAME created"
 # panel but cannot read any user's area from a job/notebook — the login-node
 # membership doesn't reach the host where the data actually lives.
 step "Creating $USERNAME on GPU host ($GPU_HOST_SSH) ..."
+run "ssh $GPU_HOST_SSH \"sudo groupadd -g $NEW_UID $USERNAME 2>/dev/null || true; \
+    sudo useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || true; \
+    sudo chown -R $NEW_UID:$NEW_UID /home/$USERNAME\""
 if [ "$SHELL_USER" = 0 ]; then
-    run "ssh $GPU_HOST_SSH \"sudo groupadd -g $NEW_UID $USERNAME 2>/dev/null || true; \
-        sudo useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || true; \
-        sudo chown -R $NEW_UID:$NEW_UID /home/$USERNAME; \
-        sudo usermod -aG $GPUUSERS_GROUP $USERNAME\""
+    run "ssh $GPU_HOST_SSH \"sudo usermod -aG $GPUUSERS_GROUP $USERNAME\""
     if [ "$ADMIN" = 1 ]; then
         run "ssh $GPU_HOST_SSH \"getent group $ADMIN_GROUP >/dev/null 2>&1 && sudo usermod -aG $ADMIN_GROUP $USERNAME || true\""
     fi
-else
-    run "ssh $GPU_HOST_SSH \"sudo groupadd -g $NEW_UID $USERNAME 2>/dev/null || true; \
-        sudo useradd -u $NEW_UID -g $NEW_UID -m -s /bin/bash $USERNAME 2>/dev/null || true; \
-        sudo chown -R $NEW_UID:$NEW_UID /home/$USERNAME\""
 fi
+# Every account type gets docker access on the GPU host too — JupyterLab and
+# notebook jobs run here, so this is where users actually need it most.
+run "ssh $GPU_HOST_SSH \"getent group $DOCKER_GROUP >/dev/null 2>&1 && sudo usermod -aG $DOCKER_GROUP $USERNAME || true\""
 ok "GPU host: $USERNAME created (UID $NEW_UID)"
 
 # ── 4. SLURM association ────────────────────────────────────────────────────────
@@ -208,9 +206,9 @@ if [ "$SHELL_USER" = 1 ]; then
     echo "    sudo passwd $USERNAME"
     echo "NOTE: $USERNAME has a real shell. Their activity is NOT audited by the tool."
     echo "      They are subject to SLURM gres/gpu limits via their association."
-    echo "      They are in the '$DOCKER_GROUP' group on this (login) node."
 else
     echo "Done. Set a password or install an SSH key:"
     echo "    sudo passwd $USERNAME            # or: install ~$USERNAME/.ssh/authorized_keys"
     echo "$USERNAME will land directly in the TUI on next SSH login."
 fi
+echo "      They are in the '$DOCKER_GROUP' group on both nodes (login + GPU host)."

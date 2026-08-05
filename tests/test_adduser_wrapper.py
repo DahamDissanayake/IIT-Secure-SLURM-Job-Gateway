@@ -63,30 +63,26 @@ def test_adduser_shell_user_gets_nfs_root_symlink():
         "regular-user branch missing: ~/shared should point to private workspace"
 
 
-def test_adduser_shell_user_gets_docker_group_on_login_node():
-    """Shell users get a real login only on the login node (the only node with
-    a Docker daemon), so they should be added to `docker` there — and only
-    there, not on the GPU host — instead of needing sudo for docker."""
+def test_adduser_every_account_type_gets_docker_group_on_both_nodes():
+    """Both the login node and the GPU host run a Docker daemon (confirmed
+    live), and JupyterLab/notebook jobs run on the GPU host -- so every
+    account type (regular, --admin, --shell-user) needs docker access on
+    BOTH nodes, not just shell-users on the login node. Granted via group
+    membership, matching how gpuusers get GPU access, rather than sudo."""
     text = ADDUSER.read_text()
     assert 'DOCKER_GROUP="${DOCKER_GROUP:-docker}"' in text
-    assert "usermod -aG $DOCKER_GROUP $USERNAME" in text
-    # Scoped to the SHELL_USER branch on the login node, not the GPU-host block.
     login_node_block = text.split("Creating $USERNAME on GPU host")[0]
-    assert "DOCKER_GROUP" in login_node_block, \
-        "docker group must be granted in the login-node provisioning block"
     gpu_host_block = text.split("Creating $USERNAME on GPU host")[1].split("SLURM association")[0]
-    assert "DOCKER_GROUP" not in gpu_host_block, \
-        "docker group should not be touched on the GPU host (no docker there)"
-
-
-def test_adduser_docker_group_scoped_to_shell_users():
-    """Regular/admin users must not be silently added to docker."""
-    text = ADDUSER.read_text()
-    assert (
-        'if [ "$SHELL_USER" = 0 ]; then\n'
-        '    run "usermod -aG $GPUUSERS_GROUP $USERNAME"\n'
-        'else\n'
-    ) in text, "docker-group grant must live in the else branch of the shell-user check"
+    assert "usermod -aG $DOCKER_GROUP $USERNAME" in login_node_block, \
+        "docker group must be granted in the login-node provisioning block"
+    assert "usermod -aG $DOCKER_GROUP $USERNAME" in gpu_host_block, \
+        "docker group must also be granted in the GPU-host provisioning block"
+    # Not gated behind the shell-user check on either node: the docker grant
+    # line must sit after (not inside) the SHELL_USER=0 conditional.
+    assert login_node_block.index('usermod -aG $GPUUSERS_GROUP $USERNAME') < \
+           login_node_block.index('usermod -aG $DOCKER_GROUP $USERNAME')
+    assert gpu_host_block.index('usermod -aG $GPUUSERS_GROUP $USERNAME') < \
+           gpu_host_block.index('usermod -aG $DOCKER_GROUP $USERNAME')
 
 
 def test_adduser_enforces_home_ownership_both_nodes():
